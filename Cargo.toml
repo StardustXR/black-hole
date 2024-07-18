@@ -1,0 +1,23 @@
+[package]
+name = "magnetar"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+color-eyre = "0.6.3"
+glam = { version = "0.28.0", features = ["mint"] }
+map-range = "0.1.2"
+mint = "0.5.9"
+rustc-hash = "2.0.0"
+tokio = { version = "1.38.0", default-features = false, features = ["rt"] }
+tween = { version = "2.0.3", features = ["glam"] }
+
+[dependencies.stardust-xr-fusion]
+git = "https://github.com/StardustXR/core.git"
+branch = "dev"
+
+[dependencies.stardust-xr-molecules]
+git = "https://github.com/StardustXR/molecules.git"
+branch = "dev"
