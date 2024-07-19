@@ -10,9 +10,12 @@ use stardust_xr_fusion::{
 	node::NodeType,
 	objects::SpatialRefProxyExt,
 	root::RootAspect,
-	spatial::Transform,
+	spatial::{SpatialRef, Transform},
 };
-use std::f32::consts::{FRAC_PI_2, PI};
+use std::{
+	f32::consts::{FRAC_PI_2, PI},
+	sync::Arc,
+};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
@@ -20,23 +23,14 @@ async fn main() -> Result<()> {
 		.await
 		.expect("Unable to connect to server");
 
-	let left_controller = stardust_xr_fusion::objects::interfaces::SpatialRefProxy::new(
-		&Connection::session().await?,
-		WellKnownName::from_static_str("org.stardustxr.Controllers")?,
-		"/org/stardustxr/Controller/left",
-	)
-	.await?
-	.import(&client)
-	.await
-	.unwrap();
-	let root = MinimizeButton::new(
-		&left_controller,
-		Transform::from_translation_rotation(
-			[0.0, 0.01, 0.02],
-			Quat::from_rotation_x(PI + FRAC_PI_2),
-		),
-	)
-	.await?;
+	let (anchor, offset) = controller_transform(&client).await?;
+	// let (anchor, offset) = hand_transform(&client).await?;
+	let root = MinimizeButton::new(&anchor, offset).await?;
+	// let root = MinimizeButton::new(
+	// 	client.get_root(),
+	// 	Transform::from_translation([0.0, 0.0, -0.3]),
+	// )
+	// .await?;
 	let _root_wrapper = client.get_root().alias().wrap(root)?;
 
 	tokio::select! {
@@ -44,4 +38,37 @@ async fn main() -> Result<()> {
 		e = event_loop => e??,
 	};
 	Ok(())
+}
+
+pub async fn controller_transform(client: &Arc<Client>) -> Result<(SpatialRef, Transform)> {
+	let anchor = stardust_xr_fusion::objects::interfaces::SpatialRefProxy::new(
+		&Connection::session().await?,
+		WellKnownName::from_static_str("org.stardustxr.Controllers")?,
+		"/org/stardustxr/Controller/left",
+	)
+	.await?
+	.import(client)
+	.await
+	.unwrap();
+
+	Ok((
+		anchor,
+		Transform::from_translation_rotation(
+			[0.0, 0.01, 0.02],
+			Quat::from_rotation_x(PI + FRAC_PI_2),
+		),
+	))
+}
+pub async fn hand_transform(client: &Arc<Client>) -> Result<(SpatialRef, Transform)> {
+	let anchor = stardust_xr_fusion::objects::interfaces::SpatialRefProxy::new(
+		&Connection::session().await?,
+		WellKnownName::from_static_str("org.stardustxr.Hands")?,
+		"/org/stardustxr/Hand/left/palm",
+	)
+	.await?
+	.import(client)
+	.await
+	.unwrap();
+
+	Ok((anchor, Transform::from_translation([0.0, -0.1, 0.0])))
 }

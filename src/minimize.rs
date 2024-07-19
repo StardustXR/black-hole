@@ -55,6 +55,7 @@ impl RootHandler for MinimizeButton {
 		let _ = self.black_hole_parent.set_relative_transform(
 			self.button.touch_plane().root(),
 			Transform::from_translation([0.0, 0.0, -0.01]),
+			// Transform::from_translation([0.0, 0.0, info.elapsed.sin() * 0.1]),
 		);
 
 		self.button.update();

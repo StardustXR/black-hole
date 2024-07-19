@@ -23,9 +23,6 @@ pub enum AnimationState {
 }
 
 pub struct BlackHole {
-	faraway: Spatial,
-	origin: Spatial,
-	root: Spatial,
 	field: Field,
 	zone: Zone,
 	_visuals: Lines,
@@ -38,22 +35,13 @@ impl BlackHole {
 	pub fn create(
 		spatial_parent: &impl SpatialRefAspect,
 	) -> NodeResult<HandlerWrapper<Zone, BlackHole>> {
-		let faraway = Spatial::create(
-			spatial_parent.node().client()?.get_root(),
-			Transform::from_translation([1000.0; 3]),
-			false,
-		)?;
-
-		let origin = Spatial::create(spatial_parent, Transform::identity(), false)?;
-		let root = Spatial::create(&origin, Transform::identity(), false)?;
-
 		let radius = 10.0;
 		let field = Field::create(
-			&root,
+			spatial_parent,
 			Transform::from_scale([0.0001; 3]),
 			Shape::Sphere(radius),
 		)?;
-		let original_zone = Zone::create(&root, Transform::from_scale([0.0; 3]), &field)?;
+		let original_zone = Zone::create(spatial_parent, Transform::from_scale([0.0; 3]), &field)?;
 		let zone = original_zone.alias();
 
 		let circle = circle(32, 0.0, radius)
@@ -70,9 +58,6 @@ impl BlackHole {
 		)?;
 
 		original_zone.wrap(BlackHole {
-			faraway,
-			origin,
-			root,
 			field,
 			zone,
 			_visuals,
@@ -127,7 +112,7 @@ impl BlackHole {
 					.field
 					.set_local_transform(Transform::from_scale([scale.max(0.0001); 3]));
 				if c.is_finished() {
-					self.contract_end();
+					self.animation_state = AnimationState::Idle;
 				}
 			}
 			_ => (),
@@ -135,20 +120,7 @@ impl BlackHole {
 	}
 	pub fn toggle(&mut self) {
 		self.open = !self.open;
-		self.expand_start();
-	}
-
-	fn expand_start(&mut self) {
-		if self.open {
-			let _ = self.root.set_spatial_parent(&self.origin);
-		}
 		self.animation_state = AnimationState::Expand(Tweener::expo_out_at(0.0, 1.0, 0.25, 0.0));
-	}
-	fn contract_end(&mut self) {
-		if !self.open {
-			let _ = self.root.set_spatial_parent(&self.faraway);
-		}
-		self.animation_state = AnimationState::Idle;
 	}
 }
 impl ZoneHandler for BlackHole {
