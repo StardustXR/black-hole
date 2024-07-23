@@ -7,10 +7,7 @@ use stardust_xr_fusion::{
 	spatial::{Spatial, SpatialAspect, SpatialRefAspect, Transform, Zone},
 	HandlerWrapper,
 };
-use stardust_xr_molecules::{
-	button::{Button, ButtonSettings},
-	DebugSettings, VisualDebug,
-};
+use stardust_xr_molecules::button::{Button, ButtonSettings};
 
 pub struct MinimizeButton {
 	button: Button,
@@ -21,8 +18,7 @@ pub struct MinimizeButton {
 }
 impl MinimizeButton {
 	pub async fn new(parent: &impl SpatialRefAspect, transform: Transform) -> Result<Self> {
-		let mut button = Button::create(parent, transform, [0.02; 2], ButtonSettings::default())?;
-		button.set_debug(Some(DebugSettings::default()));
+		let button = Button::create(parent, transform, [0.02; 2], ButtonSettings::default())?;
 		let text = Text::create(
 			button.touch_plane().root(),
 			Transform::identity(),
