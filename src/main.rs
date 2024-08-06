@@ -23,14 +23,18 @@ async fn main() -> Result<()> {
 		.await
 		.expect("Unable to connect to server");
 
-	let (anchor, offset) = controller_transform(&client).await?;
-	// let (anchor, offset) = hand_transform(&client).await?;
-	let root = MinimizeButton::new(&anchor, offset).await?;
-	// let root = MinimizeButton::new(
-	// 	client.get_root(),
-	// 	Transform::from_translation([0.0, 0.0, -0.3]),
-	// )
-	// .await?;
+	let root = if let Some((anchor, offset)) = controller_transform(&client).await {
+		MinimizeButton::new(&anchor, offset).await?
+	} else if let Some((anchor, offset)) = hand_transform(&client).await {
+		MinimizeButton::new(&anchor, offset).await?
+	} else {
+		MinimizeButton::new(
+			client.get_root(),
+			Transform::from_translation([0.0, 0.0, -0.3]),
+		)
+		.await?
+	};
+
 	let _root_wrapper = client.get_root().alias().wrap(root)?;
 
 	tokio::select! {
@@ -40,18 +44,18 @@ async fn main() -> Result<()> {
 	Ok(())
 }
 
-pub async fn controller_transform(client: &Arc<Client>) -> Result<(SpatialRef, Transform)> {
+pub async fn controller_transform(client: &Arc<Client>) -> Option<(SpatialRef, Transform)> {
 	let anchor = stardust_xr_fusion::objects::interfaces::SpatialRefProxy::new(
-		&Connection::session().await?,
-		WellKnownName::from_static_str("org.stardustxr.Controllers")?,
+		&Connection::session().await.ok()?,
+		WellKnownName::from_static_str("org.stardustxr.Controllers").ok()?,
 		"/org/stardustxr/Controller/left",
 	)
-	.await?
-	.import(client)
 	.await
-	.unwrap();
+	.ok()?
+	.import(client)
+	.await?;
 
-	Ok((
+	Some((
 		anchor,
 		Transform::from_translation_rotation(
 			[0.0, 0.01, 0.02],
@@ -59,16 +63,16 @@ pub async fn controller_transform(client: &Arc<Client>) -> Result<(SpatialRef, T
 		),
 	))
 }
-pub async fn hand_transform(client: &Arc<Client>) -> Result<(SpatialRef, Transform)> {
+pub async fn hand_transform(client: &Arc<Client>) -> Option<(SpatialRef, Transform)> {
 	let anchor = stardust_xr_fusion::objects::interfaces::SpatialRefProxy::new(
-		&Connection::session().await?,
-		WellKnownName::from_static_str("org.stardustxr.Hands")?,
+		&Connection::session().await.ok()?,
+		WellKnownName::from_static_str("org.stardustxr.Hands").ok()?,
 		"/org/stardustxr/Hand/left/palm",
 	)
-	.await?
-	.import(client)
 	.await
-	.unwrap();
+	.ok()?
+	.import(client)
+	.await?;
 
-	Ok((anchor, Transform::from_translation([0.0, -0.1, 0.0])))
+	Some((anchor, Transform::from_translation([0.0, -0.1, 0.0])))
 }

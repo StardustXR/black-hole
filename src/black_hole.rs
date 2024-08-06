@@ -36,11 +36,7 @@ impl BlackHole {
 		spatial_parent: &impl SpatialRefAspect,
 	) -> NodeResult<HandlerWrapper<Zone, BlackHole>> {
 		let radius = 10.0;
-		let field = Field::create(
-			spatial_parent,
-			Transform::from_scale([0.0001; 3]),
-			Shape::Sphere(radius),
-		)?;
+		let field = Field::create(spatial_parent, Transform::identity(), Shape::Sphere(radius))?;
 		let original_zone = Zone::create(spatial_parent, Transform::from_scale([0.0; 3]), &field)?;
 		let zone = original_zone.alias();
 
@@ -56,6 +52,8 @@ impl BlackHole {
 				circle,
 			],
 		)?;
+
+		field.set_local_transform(Transform::from_scale([0.0001; 3]))?;
 
 		original_zone.wrap(BlackHole {
 			field,
