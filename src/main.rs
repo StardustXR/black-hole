@@ -3,6 +3,7 @@ pub mod minimize;
 
 use color_eyre::eyre::Result;
 use glam::Quat;
+use manifest_dir_macros::directory_relative_path;
 use minimize::MinimizeButton;
 use stardust_xr_fusion::{
 	client::Client,
@@ -22,6 +23,7 @@ async fn main() -> Result<()> {
 	let (client, event_loop) = Client::connect_with_async_loop()
 		.await
 		.expect("Unable to connect to server");
+	client.set_base_prefixes(&[directory_relative_path!("res")])?;
 
 	let root = if let Some((anchor, offset)) = controller_transform(&client).await {
 		MinimizeButton::new(&anchor, offset).await?

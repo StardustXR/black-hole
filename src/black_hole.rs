@@ -1,7 +1,6 @@
-use glam::Mat4;
 use rustc_hash::FxHashMap;
 use stardust_xr_fusion::{
-	drawable::Lines,
+	drawable::Model,
 	fields::{Field, Shape},
 	node::{NodeResult, NodeType},
 	root::FrameInfo,
@@ -9,11 +8,9 @@ use stardust_xr_fusion::{
 		Spatial, SpatialAspect, SpatialRef, SpatialRefAspect, Transform, Zone, ZoneAspect,
 		ZoneHandler,
 	},
-	values::color::rgba_linear,
+	values::ResourceID,
 	HandlerWrapper,
 };
-use stardust_xr_molecules::lines::{circle, LineExt};
-use std::f32::consts::FRAC_PI_2;
 use tween::{ExpoIn, ExpoOut, Tweener};
 
 pub enum AnimationState {
@@ -25,7 +22,8 @@ pub enum AnimationState {
 pub struct BlackHole {
 	field: Field,
 	zone: Zone,
-	_visuals: Lines,
+	// _visuals: Lines,
+	_visuals: Model,
 	open: bool,
 	animation_state: AnimationState,
 	entered: FxHashMap<u64, SpatialRef>,
@@ -40,17 +38,22 @@ impl BlackHole {
 		let original_zone = Zone::create(spatial_parent, Transform::from_scale([0.0; 3]), &field)?;
 		let zone = original_zone.alias();
 
-		let circle = circle(32, 0.0, radius)
-			.color(rgba_linear!(0.0, 1.0, 0.75, 1.0))
-			.thickness(0.005);
-		let _visuals = Lines::create(
+		// let circle = circle(32, 0.0, radius)
+		// 	.color(rgba_linear!(0.0, 1.0, 0.75, 1.0))
+		// 	.thickness(0.005);
+		// let _visuals = Lines::create(
+		// 	&field,
+		// 	Transform::identity(),
+		// 	&[
+		// 		circle.clone().transform(Mat4::from_rotation_x(FRAC_PI_2)),
+		// 		circle.clone().transform(Mat4::from_rotation_z(FRAC_PI_2)),
+		// 		circle,
+		// 	],
+		// )?;
+		let _visuals = Model::create(
 			&field,
-			Transform::identity(),
-			&[
-				circle.clone().transform(Mat4::from_rotation_x(FRAC_PI_2)),
-				circle.clone().transform(Mat4::from_rotation_z(FRAC_PI_2)),
-				circle,
-			],
+			Transform::from_scale([radius; 3]),
+			&ResourceID::new_namespaced("black_hole", "black_hole"),
 		)?;
 
 		field.set_local_transform(Transform::from_scale([0.0001; 3]))?;

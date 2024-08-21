@@ -217,6 +217,7 @@ version = "0.1.0"
 dependencies = [
  "color-eyre",
  "glam 0.28.0",
+ "manifest-dir-macros",
  "map-range",
  "mint",
  "rustc-hash 2.0.0",
