@@ -14,8 +14,16 @@
       nixpkgsFor = forAllSystems (system: import nixpkgs { inherit system; });
   in {
     packages = forAllSystems (system: let pkgs = nixpkgsFor.${system}; in {
-      default = crane.lib.${system}.buildPackage {
+      default =
+      let
+      craneLib = (crane.mkLib pkgs).overrideToolchain (p: p.rust-bin.stable.latest.default.override {
+        targets = [ "x86_64-unknown-linux-musl" ];
+      });
+      in craneLib.buildPackage {
         src = ./.;
+
+        CARGO_BUILD_TARGET = "x86_64-unknown-linux-musl";
+        CARGO_BUILD_RUSTFLAGS = "-C target-feature=+crt-static";
 
         STARDUST_RES_PREFIXES = pkgs.stdenvNoCC.mkDerivation {
           name = "resources";
