@@ -1,2 +1,2 @@
 # Black Hole
-Spatial storage for stardust xr
+Spatial storage for Stardust XR
