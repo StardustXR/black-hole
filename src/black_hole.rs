@@ -6,10 +6,9 @@ use stardust_xr_fusion::{
 	root::FrameInfo,
 	spatial::{
 		Spatial, SpatialAspect, SpatialRef, SpatialRefAspect, Transform, Zone, ZoneAspect,
-		ZoneHandler,
+		ZoneEvent,
 	},
 	values::ResourceID,
-	HandlerWrapper,
 };
 use tween::{ExpoIn, ExpoOut, Tweener};
 
@@ -20,9 +19,9 @@ pub enum AnimationState {
 }
 
 pub struct BlackHole {
+	pub spatial: Spatial,
 	field: Field,
 	zone: Zone,
-	// _visuals: Lines,
 	_visuals: Model,
 	open: bool,
 	animation_state: AnimationState,
@@ -30,26 +29,12 @@ pub struct BlackHole {
 	captured: FxHashMap<u64, Spatial>,
 }
 impl BlackHole {
-	pub fn create(
-		spatial_parent: &impl SpatialRefAspect,
-	) -> NodeResult<HandlerWrapper<Zone, BlackHole>> {
+	pub fn new(spatial_parent: &impl SpatialRefAspect) -> NodeResult<BlackHole> {
+		let spatial = Spatial::create(spatial_parent, Transform::identity(), false)?;
 		let radius = 10.0;
-		let field = Field::create(spatial_parent, Transform::identity(), Shape::Sphere(radius))?;
-		let original_zone = Zone::create(spatial_parent, Transform::from_scale([0.0; 3]), &field)?;
-		let zone = original_zone.alias();
+		let field = Field::create(&spatial, Transform::identity(), Shape::Sphere(radius))?;
+		let zone = Zone::create(&spatial, Transform::from_scale([0.0; 3]), &field)?;
 
-		// let circle = circle(32, 0.0, radius)
-		// 	.color(rgba_linear!(0.0, 1.0, 0.75, 1.0))
-		// 	.thickness(0.005);
-		// let _visuals = Lines::create(
-		// 	&field,
-		// 	Transform::identity(),
-		// 	&[
-		// 		circle.clone().transform(Mat4::from_rotation_x(FRAC_PI_2)),
-		// 		circle.clone().transform(Mat4::from_rotation_z(FRAC_PI_2)),
-		// 		circle,
-		// 	],
-		// )?;
 		let _visuals = Model::create(
 			&field,
 			Transform::from_scale([radius; 3]),
@@ -58,7 +43,8 @@ impl BlackHole {
 
 		field.set_local_transform(Transform::from_scale([0.0001; 3]))?;
 
-		original_zone.wrap(BlackHole {
+		Ok(BlackHole {
+			spatial,
 			field,
 			zone,
 			_visuals,
@@ -74,10 +60,28 @@ impl BlackHole {
 	pub fn in_transition(&self) -> bool {
 		!matches!(&self.animation_state, AnimationState::Idle)
 	}
-	pub fn update(&mut self, info: &FrameInfo) {
+	pub fn frame(&mut self, info: &FrameInfo) {
 		let _ = self.zone.update();
+		while let Some(event) = self.zone.recv_zone_event() {
+			match event {
+				ZoneEvent::Enter { spatial } => {
+					self.entered.insert(spatial.node().id(), spatial);
+				}
+				ZoneEvent::Capture { spatial } => {
+					let _ = spatial.set_spatial_parent_in_place(&self.zone);
+					self.captured.insert(spatial.node().id(), spatial);
+				}
+				ZoneEvent::Release { id } => {
+					self.captured.remove(&id);
+				}
+				ZoneEvent::Leave { id } => {
+					self.entered.remove(&id);
+				}
+			}
+		}
 		match &mut self.animation_state {
 			AnimationState::Expand(e) => {
+				self._visuals.set_enabled(true);
 				let scale = e.move_by(info.delta);
 
 				if self.open {
@@ -113,6 +117,7 @@ impl BlackHole {
 					.field
 					.set_local_transform(Transform::from_scale([scale.max(0.0001); 3]));
 				if c.is_finished() {
+					self._visuals.set_enabled(false);
 					self.animation_state = AnimationState::Idle;
 				}
 			}
@@ -122,24 +127,5 @@ impl BlackHole {
 	pub fn toggle(&mut self) {
 		self.open = !self.open;
 		self.animation_state = AnimationState::Expand(Tweener::expo_out_at(0.0, 1.0, 0.25, 0.0));
-	}
-}
-impl ZoneHandler for BlackHole {
-	fn enter(&mut self, spatial: SpatialRef) {
-		self.entered
-			.insert(spatial.node().get_id().unwrap(), spatial);
-	}
-
-	fn capture(&mut self, spatial: Spatial) {
-		let _ = spatial.set_spatial_parent_in_place(&self.zone);
-		self.captured
-			.insert(spatial.node().get_id().unwrap(), spatial);
-	}
-	fn release(&mut self, id: u64) {
-		self.captured.remove(&id);
-	}
-
-	fn leave(&mut self, id: u64) {
-		self.entered.remove(&id);
 	}
 }
