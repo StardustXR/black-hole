@@ -12,12 +12,14 @@ map-range = "0.1.2"
 mint = "0.5.9"
 rustc-hash = "2.0.0"
 tokio = { version = "1.38.0", default-features = false, features = ["rt"] }
+tokio-stream = { version = "0.1.17", features = ["signal"] }
 tween = { version = "2.0.3", features = ["glam"] }
+zbus = { version = "5.5.0", features = ["tokio"] }
 
 [dependencies.stardust-xr-fusion]
 git = "https://github.com/StardustXR/core.git"
 branch = "dev"
 
 [dependencies.stardust-xr-molecules]
-git = "https://github.com/StardustXR/molecules.git"
-branch = "dev"
+git = "https://github.com/Schmarni-Dev/molecules.git"
+branch = "tracking_state"
