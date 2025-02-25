@@ -58,22 +58,25 @@ async fn main() -> Result<()> {
 		);
 	};
 	let mut client = async_loop.stop().await?;
-	client
-		.sync_event_loop(|client, _| {
-			while let Some(event) = client.get_root().recv_root_event() {
-				match event {
-					RootEvent::Frame { info } => {
-						black_hole.frame(&info);
-						for button in buttons.iter_mut().filter_map(Option::as_mut) {
-							button.frame(&mut black_hole);
-						}
+	let loop_future = client.sync_event_loop(|client, _| {
+		while let Some(event) = client.get_root().recv_root_event() {
+			match event {
+				RootEvent::Frame { info } => {
+					black_hole.frame(&info);
+					for button in buttons.iter_mut().filter_map(Option::as_mut) {
+						button.frame(&mut black_hole);
 					}
-					RootEvent::SaveState { response: _ } => {}
 				}
+				RootEvent::SaveState { response: _ } => {}
 			}
-		})
-		.await?;
-	tokio::signal::ctrl_c().await?;
+		}
+	});
+	tokio::select! {
+		_ = loop_future => {},
+		_ = tokio::signal::ctrl_c() => {}
+	};
+	black_hole.open_now();
+	_ = client.try_flush().await;
 	Ok(())
 }
 
