@@ -566,15 +566,6 @@ checksum = "4271d37baee1b8c7e4b708028c57d816cf9d2434acb33a549475f78c181f6253"
 
 [[package]]
 name = "glam"
-version = "0.24.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5418c17512bdf42730f9032c74e1ae39afc408745ebb2acf72fbc4691c17945"
-dependencies = [
- "mint",
-]
-
-[[package]]
-name = "glam"
 version = "0.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9e05e7e6723e3455f4818c7b26e855439f7546cf617ef669d1adedb8669e5cb9"
@@ -596,6 +587,15 @@ name = "glam"
 version = "0.29.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc46dd3ec48fdd8e693a98d2b8bafae273a2d54c1de02a2a7e3d57d501f39677"
+
+[[package]]
+name = "glam"
+version = "0.30.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf3aa70d918d2b234126ff4f850f628f172542bf0603ded26b8ee36e5e22d5f9"
+dependencies = [
+ "mint",
+]
 
 [[package]]
 name = "global_counter"
@@ -1276,7 +1276,7 @@ checksum = "2f2b15926089e5526bb2dd738a2eb0e59034356e06eb71e1cd912358c0e62c4d"
 [[package]]
 name = "stardust-xr"
 version = "0.45.0"
-source = "git+https://github.com/StardustXR/core.git?branch=dev#be669ff4cd3b6776533b2cac8b5bcaf326420a47"
+source = "git+https://github.com/StardustXR/core.git?branch=dev#d2964d8db079afaadb7faa4987e34814e62d6279"
 dependencies = [
  "cluFlock",
  "color-eyre",
@@ -1297,11 +1297,11 @@ dependencies = [
 [[package]]
 name = "stardust-xr-fusion"
 version = "0.45.0"
-source = "git+https://github.com/StardustXR/core.git?branch=dev#be669ff4cd3b6776533b2cac8b5bcaf326420a47"
+source = "git+https://github.com/StardustXR/core.git?branch=dev#d2964d8db079afaadb7faa4987e34814e62d6279"
 dependencies = [
  "color-eyre",
  "dashmap",
- "glam 0.24.2",
+ "glam 0.30.1",
  "global_counter",
  "parking_lot 0.12.3",
  "rustc-hash 1.1.0",
@@ -1319,7 +1319,7 @@ dependencies = [
 [[package]]
 name = "stardust-xr-fusion-codegen"
 version = "0.1.0"
-source = "git+https://github.com/StardustXR/core.git?branch=dev#be669ff4cd3b6776533b2cac8b5bcaf326420a47"
+source = "git+https://github.com/StardustXR/core.git?branch=dev#d2964d8db079afaadb7faa4987e34814e62d6279"
 dependencies = [
  "convert_case",
  "mint",
@@ -1332,7 +1332,7 @@ dependencies = [
 [[package]]
 name = "stardust-xr-molecules"
 version = "0.45.0"
-source = "git+https://github.com/Schmarni-Dev/molecules.git?branch=tracking_state#d6e64bd2281f2c9d68e838bb4da211ba4f94151b"
+source = "git+https://github.com/StardustXR/molecules.git?branch=dev#4871307e677cab37a606400b3101a51c335f851f"
 dependencies = [
  "futures-util",
  "glam 0.27.0",
@@ -1351,7 +1351,7 @@ dependencies = [
 [[package]]
 name = "stardust-xr-schemas"
 version = "1.5.3"
-source = "git+https://github.com/StardustXR/core.git?branch=dev#be669ff4cd3b6776533b2cac8b5bcaf326420a47"
+source = "git+https://github.com/StardustXR/core.git?branch=dev#d2964d8db079afaadb7faa4987e34814e62d6279"
 dependencies = [
  "flatbuffers",
  "flexbuffers",

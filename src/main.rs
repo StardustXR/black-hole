@@ -68,6 +68,9 @@ async fn main() -> Result<()> {
 					}
 				}
 				RootEvent::SaveState { response: _ } => {}
+				RootEvent::Ping { response } => {
+					response.send(Ok(()));
+				}
 			}
 		}
 	});

@@ -21,5 +21,5 @@ git = "https://github.com/StardustXR/core.git"
 branch = "dev"
 
 [dependencies.stardust-xr-molecules]
-git = "https://github.com/Schmarni-Dev/molecules.git"
-branch = "tracking_state"
+git = "https://github.com/StardustXR/molecules.git"
+branch = "dev"
