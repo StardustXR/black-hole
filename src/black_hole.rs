@@ -2,19 +2,23 @@ use glam::Vec3;
 use gluon::{Handler, Interface};
 use rustc_hash::FxHashMap;
 use stardust_xr_fusion::{
+	Result,
 	client::{Client, ClientHandler, FrameInfo},
 	drawable::{Model, ModelExt},
 	fields::{FieldRef, FieldSample},
 	query::{InterfaceDependency, QueriedInterface, QueryableObjectRef},
-	spatial::{Spatial, SpatialExt, SpatialRef, Transform},
-	spatial_query::{Point, PointsQuery, PointsQueryHandle, PointsQueryHandler, PointsQueryHandlerHandler},
+	spatial::{PartialTransform, Spatial, SpatialExt, SpatialRef, Transform},
+	spatial_query::{
+		Point, PointsQuery, PointsQueryHandle, PointsQueryHandler, PointsQueryHandlerHandler,
+	},
 	types::Resource,
-	Result,
 };
 use stardust_xr_molecules::reparentable::{
-	ReparentKeepalive, ReparentKeepaliveHandler, ReparentableProxy, ReparentableLockedProxy,
+	ReparentHandle, ReparentKeepalive, ReparentKeepaliveHandler, ReparentableLockedProxy,
+	ReparentableProxy,
 };
 use std::sync::Mutex;
+use tokio::sync::mpsc;
 use tween::{ExpoIn, ExpoOut, Tweener};
 
 pub enum AnimationState {
@@ -90,6 +94,7 @@ pub struct BlackHole {
 	target_ref: SpatialRef,
 	reparent_spatial: Spatial,
 	reparent_ref: SpatialRef,
+	reparent_keepalive: gluon::Object<BlackHoleKeepalive>,
 	// kept permanently at scale 1, tracking target_spatial's position, so the query's
 	// reach never collapses along with target_spatial's animated 0..1 scale
 	query_spatial: Spatial,
@@ -98,7 +103,10 @@ pub struct BlackHole {
 	_visuals: Model,
 	open: bool,
 	animation_state: AnimationState,
-	captured: FxHashMap<QueryableObjectRef, gluon::Object<BlackHoleKeepalive>>,
+	captured: (
+		mpsc::UnboundedSender<ReparentHandle>,
+		mpsc::UnboundedReceiver<ReparentHandle>,
+	),
 }
 impl BlackHole {
 	pub async fn new<H: ClientHandler>(
@@ -121,14 +129,16 @@ impl BlackHole {
 			.spatial_query_interface()
 			.points_query(PointsQuery {
 				handler: PointsQueryHandler::from_handler(&points),
-				interfaces: vec![InterfaceDependency {
-					id: ReparentableProxy::ID.into(),
-					optional: false,
-				},
-				InterfaceDependency {
-					id: ReparentableLockedProxy::ID.into(),
-					optional: false,
-				}],
+				interfaces: vec![
+					InterfaceDependency {
+						id: ReparentableProxy::ID.into(),
+						optional: false,
+					},
+					InterfaceDependency {
+						id: ReparentableLockedProxy::ID.into(),
+						optional: false,
+					},
+				],
 				reference_spatial: query_ref.clone(),
 				points: vec![Point {
 					point: [0.0, 0.0, 0.0].into(),
@@ -149,6 +159,7 @@ impl BlackHole {
 		)
 		.await?;
 
+		let reparent_keepalive = client.pion_device().register_object(BlackHoleKeepalive);
 		Ok(BlackHole {
 			root: client.root().clone(),
 			target_spatial,
@@ -161,7 +172,8 @@ impl BlackHole {
 			_visuals,
 			open: true,
 			animation_state: AnimationState::Idle,
-			captured: FxHashMap::default(),
+			captured: mpsc::unbounded_channel(),
+			reparent_keepalive,
 		})
 	}
 	pub fn open(&self) -> bool {
@@ -170,22 +182,28 @@ impl BlackHole {
 	pub fn in_transition(&self) -> bool {
 		!matches!(&self.animation_state, AnimationState::Idle)
 	}
-	pub fn frame<H: ClientHandler>(&mut self, client: &Client<H>, info: &FrameInfo) {
+	pub fn frame<H: ClientHandler>(&mut self, _client: &Client<H>, info: &FrameInfo) {
 		match &mut self.animation_state {
 			AnimationState::Expand(e) => {
 				let scale = e.move_by(info.delta);
 				let _ = self
 					.target_spatial
-					.set_local_transform(Transform::from_scale([scale.max(0.0); 3]));
+					.set_local_transform(PartialTransform::from_scale([scale.max(0.0); 3]));
 
 				if e.is_finished() {
 					self.animation_state =
 						AnimationState::Contract(Tweener::expo_in_at(1.0, 0.0, 0.25, 0.0));
 
 					if self.open {
+						// self.reparent_spatial.set_relative_transform(
+						// 	self.root.clone(),
+						// 	PartialTransform::from_scale([1.0; 3]),
+						// );
+						//                   sleep(Duration::from_millis(100));
 						// opening: drop the locks, the reparentable objects take care of
 						// putting themselves back where they belong on their own
-						self.captured.clear();
+						self.captured = mpsc::unbounded_channel();
+						tracing::info!("dropping all captures");
 					} else {
 						// closing: capture everything currently reparentable
 						let in_zone: Vec<_> = self
@@ -196,17 +214,21 @@ impl BlackHole {
 							.iter()
 							.map(|(k, v)| (k.clone(), v.clone()))
 							.collect();
-						for (key, (_reparentable, reparentable_locked)) in in_zone {
-							let keepalive_obj =
-								client.pion_device().register_object(BlackHoleKeepalive);
-							let keepalive = ReparentKeepalive::from_handler(&keepalive_obj);
-							self.captured.insert(key, keepalive_obj);
-
+						for (_, (_reparentable, reparentable_locked)) in in_zone {
+							let keepalive =
+								ReparentKeepalive::from_handler(&self.reparent_keepalive);
+							let sender = self.captured.0.clone();
 							let reparent_ref = self.reparent_ref.clone();
 							tokio::spawn(async move {
-								_ = reparentable_locked
+								let Some(handle) = reparentable_locked
 									.reparent_locking(reparent_ref, keepalive)
-									.await;
+									.await
+									.ok()
+									.flatten()
+								else {
+									return;
+								};
+								_ = sender.send(handle);
 							});
 						}
 					}
@@ -216,7 +238,7 @@ impl BlackHole {
 				let scale = c.move_by(info.delta);
 				let _ = self
 					.target_spatial
-					.set_local_transform(Transform::from_scale([scale.max(0.0); 3]));
+					.set_local_transform(PartialTransform::from_scale([scale.max(0.0); 3]));
 
 				if c.is_finished() {
 					self.animation_state = AnimationState::Idle;
@@ -226,22 +248,24 @@ impl BlackHole {
 		};
 	}
 	pub fn toggle(&mut self, target: &SpatialRef) {
-		_ = self
-			.query_spatial
-			.set_relative_transform(target.clone(), Transform::from_translation(Vec3::ZERO));
+		_ = self.query_spatial.set_relative_transform(
+			target.clone(),
+			PartialTransform::from_translation(Vec3::ZERO),
+		);
 		_ = self
 			.target_spatial
-			.set_local_transform(Transform::from_scale(Vec3::ONE));
+			.set_local_transform(PartialTransform::from_scale(Vec3::ONE));
 		_ = self.reparent_spatial.set_parent_in_place(self.root.clone());
-		_ = self
-			.target_spatial
-			.set_relative_transform(target.clone(), Transform::from_translation(Vec3::ZERO));
+		_ = self.target_spatial.set_relative_transform(
+			target.clone(),
+			PartialTransform::from_translation(Vec3::ZERO),
+		);
 		_ = self
 			.reparent_spatial
 			.set_parent_in_place(self.target_ref.clone());
 		_ = self
 			.target_spatial
-			.set_local_transform(Transform::from_scale(if self.open {
+			.set_local_transform(PartialTransform::from_scale(if self.open {
 				Vec3::ONE
 			} else {
 				Vec3::ZERO
