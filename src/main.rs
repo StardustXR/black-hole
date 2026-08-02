@@ -2,163 +2,116 @@ pub mod black_hole;
 pub mod minimize;
 
 use black_hole::BlackHole;
-use glam::Quat;
-use minimize::{MinimizeButton, MinimizeButtonEvent};
-use stardust_xr_fusion::{
-	client::Client,
-	interfaces::SpatialRefProxy,
-	objects::{connect_client, object_registry::ObjectRegistry, SpatialRefProxyExt},
-	project_local_resources,
-	root::{RootAspect, RootEvent},
-	spatial::{SpatialRef, Transform},
-	ClientHandle,
-};
-use stardust_xr_molecules::tracked::TrackedProxy;
-use std::{
-	f32::consts::{FRAC_PI_2, PI},
-	sync::{mpsc, Arc},
-	time::Duration,
-};
-use tokio::time::sleep;
-use tokio_stream::StreamExt;
-use zbus::{names::WellKnownName, Connection};
+use gluon::Liveness;
+use minimize::MinimizeButton;
+use stardust_xr_fusion::{client::Client, project_local_resources, spatial::Transform};
+use tokio::sync::broadcast::error::RecvError;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-	let client = Client::connect()
+	tracing_subscriber::fmt().pretty().with_file(false).init();
+
+	let (client, root) = Client::auto_connect(&[&project_local_resources!("data")])
 		.await
 		.expect("Unable to connect to server");
-	client
-		.setup_resources(&[&project_local_resources!("res")])
-		.unwrap();
-	let conn = Connection::session().await.unwrap();
-	let client_handle = client.handle();
-	let async_loop = client.async_event_loop();
-	let dbus_connection = connect_client().await.unwrap();
-	let object_registry = ObjectRegistry::new(&dbus_connection).await;
 
-	let mut black_hole = BlackHole::new(client_handle.get_root(), object_registry)
+	let mut black_hole = BlackHole::new(&client, &root)
 		.await
-		.unwrap();
-	let mut buttons: [Option<MinimizeButton>; 2] = [None, None];
-	let mut was_spawned = false;
-	if let Some((anchor, offset, tracked)) = controller_transform(&client_handle, &conn).await {
-		was_spawned = true;
-		let (button, tx) = MinimizeButton::new(&anchor, offset).unwrap();
-		update_tracked_state(tracked, tx);
-		buttons[0] = Some(button);
-	};
-	if let Some((anchor, offset, tracked)) = hand_transform(&client_handle, &conn).await {
-		was_spawned = true;
-		let (button, tx) = MinimizeButton::new(&anchor, offset).unwrap();
-		update_tracked_state(tracked, tx);
-		buttons[1] = Some(button);
+		.expect("Unable to create black hole");
+
+	// TODO: anchor the minimize button to the hand/controller via
+	// controller_transform/hand_transform below once the server exposes tracked
+	// objects for them through stardust_xr_fusion::tracked (currently only
+	// "stardust-hmd" and "stardust-stage" are implemented server-side).
+	// Until then it's always anchored to root.
+	let button = MinimizeButton::new(
+		&client,
+		&root,
+		Transform::from_translation([0.0, 0.0, -0.3]),
+	)
+	.await
+	.expect("Unable to create minimize button");
+	let mut buttons = [button];
+
+	let mut recv = client.frame_receiver();
+	let server = client.server();
+	loop {
+		let info = tokio::select! {
+			f = recv.recv() => {
+				match f {
+					Ok(info) => info,
+					Err(RecvError::Closed) => break,
+					Err(RecvError::Lagged(_)) => continue,
+				}
+			}
+			_ = server.death_notification() => break,
+		};
+
+		black_hole.frame(&client, &info);
+		for button in buttons.iter_mut() {
+			button.frame(&mut black_hole);
+		}
 	}
-	if !was_spawned {
-		println!("hitting the fallback! :3 ?");
-		buttons[0] = Some(
-			MinimizeButton::new(
-				client_handle.get_root(),
-				Transform::from_translation([0.0, 0.0, -0.3]),
-			)
-			.unwrap()
-			.0,
-		);
-	};
-	let mut client = async_loop.stop().await.unwrap();
-	let loop_future = client.sync_event_loop(|client, _| {
-		while let Some(event) = client.get_root().recv_root_event() {
-			match event {
-				RootEvent::Frame { info } => {
-					black_hole.frame(&info);
-					for button in buttons.iter_mut().filter_map(Option::as_mut) {
-						button.frame(&mut black_hole);
-					}
-				}
-				RootEvent::SaveState { response: _ } => {}
-				RootEvent::Ping { response } => {
-					response.send_ok(());
-				}
-			}
-		}
-	});
-	tokio::select! {
-		_ = loop_future => {},
-		_ = tokio::signal::ctrl_c() => {}
-	};
-	drop(black_hole);
-	_ = client.try_flush().await;
-	sleep(Duration::from_millis(50)).await;
 }
 
-fn update_tracked_state(tracked: TrackedProxy<'static>, tx: mpsc::Sender<MinimizeButtonEvent>) {
-	tokio::spawn(async move {
-		if let Ok(is_tracked) = tracked.is_tracked().await {
-			_ = tx.send(MinimizeButtonEvent::SetEnabled(is_tracked));
-		}
-		let mut stream = tracked.receive_is_tracked_changed().await;
-		while let Some(value) = stream.next().await {
-			if let Ok(is_tracked) = value.get().await {
-				_ = tx.send(MinimizeButtonEvent::SetEnabled(is_tracked));
-			}
-		}
-	});
-}
-
-pub async fn controller_transform(
-	client: &Arc<ClientHandle>,
-	conn: &Connection,
-) -> Option<(SpatialRef, Transform, TrackedProxy<'static>)> {
-	let anchor = SpatialRefProxy::new(
-		conn,
-		WellKnownName::from_static_str("org.stardustxr.Controllers").ok()?,
-		"/org/stardustxr/Controller/left",
-	)
-	.await
-	.ok()?
-	.import(client)
-	.await?;
-	let tracked = TrackedProxy::new(
-		conn,
-		WellKnownName::from_static_str("org.stardustxr.Controllers").ok()?,
-		"/org/stardustxr/Controller/left",
-	)
-	.await
-	.ok()?;
-
-	Some((
-		anchor,
-		Transform::from_translation_rotation(
-			[0.0, 0.01, 0.02],
-			Quat::from_rotation_x(PI + FRAC_PI_2),
-		),
-		tracked,
-	))
-}
-pub async fn hand_transform(
-	client: &Arc<ClientHandle>,
-	conn: &Connection,
-) -> Option<(SpatialRef, Transform, TrackedProxy<'static>)> {
-	let anchor = stardust_xr_fusion::objects::interfaces::SpatialRefProxy::new(
-		conn,
-		WellKnownName::from_static_str("org.stardustxr.Hands").ok()?,
-		"/org/stardustxr/Hand/left/palm",
-	)
-	.await
-	.ok()?
-	.import(client)
-	.await?;
-	let tracked = TrackedProxy::new(
-		conn,
-		WellKnownName::from_static_str("org.stardustxr.Hands").ok()?,
-		"/org/stardustxr/Hand/left",
-	)
-	.await
-	.ok()?;
-
-	Some((
-		anchor,
-		Transform::from_translation_rotation([0.0, 0.03, 0.0], Quat::from_rotation_x(-FRAC_PI_2)),
-		tracked,
-	))
-}
+// TODO: port these to the new stardust_xr_fusion::tracked API once the server
+// implements tracked objects for controllers/hands (see the TODO in main above).
+// Kept around as reference for the dbus-based lookup this used to do.
+//
+// pub async fn controller_transform(
+// 	client: &Arc<ClientHandle>,
+// 	conn: &Connection,
+// ) -> Option<(SpatialRef, Transform, TrackedProxy<'static>)> {
+// 	let anchor = SpatialRefProxy::new(
+// 		conn,
+// 		WellKnownName::from_static_str("org.stardustxr.Controllers").ok()?,
+// 		"/org/stardustxr/Controller/left",
+// 	)
+// 	.await
+// 	.ok()?
+// 	.import(client)
+// 	.await?;
+// 	let tracked = TrackedProxy::new(
+// 		conn,
+// 		WellKnownName::from_static_str("org.stardustxr.Controllers").ok()?,
+// 		"/org/stardustxr/Controller/left",
+// 	)
+// 	.await
+// 	.ok()?;
+//
+// 	Some((
+// 		anchor,
+// 		Transform::from_translation_rotation(
+// 			[0.0, 0.01, 0.02],
+// 			Quat::from_rotation_x(PI + FRAC_PI_2),
+// 		),
+// 		tracked,
+// 	))
+// }
+// pub async fn hand_transform(
+// 	client: &Arc<ClientHandle>,
+// 	conn: &Connection,
+// ) -> Option<(SpatialRef, Transform, TrackedProxy<'static>)> {
+// 	let anchor = stardust_xr_fusion::objects::interfaces::SpatialRefProxy::new(
+// 		conn,
+// 		WellKnownName::from_static_str("org.stardustxr.Hands").ok()?,
+// 		"/org/stardustxr/Hand/left/palm",
+// 	)
+// 	.await
+// 	.ok()?
+// 	.import(client)
+// 	.await?;
+// 	let tracked = TrackedProxy::new(
+// 		conn,
+// 		WellKnownName::from_static_str("org.stardustxr.Hands").ok()?,
+// 		"/org/stardustxr/Hand/left",
+// 	)
+// 	.await
+// 	.ok()?;
+//
+// 	Some((
+// 		anchor,
+// 		Transform::from_translation_rotation([0.0, 0.03, 0.0], Quat::from_rotation_x(-FRAC_PI_2)),
+// 		tracked,
+// 	))
+// }

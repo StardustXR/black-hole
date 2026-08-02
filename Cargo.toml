@@ -4,15 +4,21 @@ version = "0.50.0"
 edition = "2021"
 
 [dependencies]
-color-eyre = "0.6.3"
 glam = { version = "0.30.8", features = ["mint"] }
-map-range = "0.1.2"
 rustc-hash = "2.0.0"
 tokio = { version = "1.38.0", default-features = false, features = ["rt"] }
 tokio-stream = { version = "0.1.17", features = ["signal"] }
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["tracing"] }
 tween = { version = "2.0.3", features = ["glam"] }
-zbus = { version = "5.5.0", features = ["tokio"] }
-# stardust-xr-fusion = "0.50.0"
-# stardust-xr-molecules = "0.50.0"
-stardust-xr-fusion.git = "https://github.com/StardustXR/core"
-stardust-xr-molecules.git = "https://github.com/StardustXR/molecules"
+
+[dependencies.gluon]
+git = "https://github.com/technobaboo/gluon"
+
+[dependencies.stardust-xr-fusion]
+git = "https://github.com/StardustXR/core"
+branch = "binder"
+
+[dependencies.stardust-xr-molecules]
+git = "https://github.com/StardustXR/molecules"
+branch = "binder"

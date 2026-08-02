@@ -1,19 +1,20 @@
 use glam::Vec3;
+use gluon::Handler;
 use rustc_hash::FxHashMap;
 use stardust_xr_fusion::{
-	drawable::Model,
-	node::{NodeResult, NodeType},
-	objects::{
-		interfaces::{ReparentLockProxy, ReparentableProxy},
-		object_registry::ObjectRegistry,
-		ObjectInfo,
-	},
-	query::{ObjectQuery, QueryEvent},
-	root::FrameInfo,
-	spatial::{Spatial, SpatialAspect, SpatialRefAspect, Transform},
-	values::ResourceID,
+	client::{Client, ClientHandler, FrameInfo},
+	drawable::{Model, ModelExt},
+	fields::{FieldRef, FieldSample},
+	query::{InterfaceDependency, QueriedInterface, QueryableObjectRef},
+	spatial::{Spatial, SpatialExt, SpatialRef, Transform},
+	spatial_query::{Point, PointsQuery, PointsQueryHandle, PointsQueryHandler, PointsQueryHandlerHandler},
+	types::Resource,
+	Result,
 };
-use std::sync::Arc;
+use stardust_xr_molecules::reparentable::{
+	ReparentKeepalive, ReparentKeepaliveHandler, ReparentableProxy, REPARENTABLE_PROTOCOL,
+};
+use std::sync::Mutex;
 use tween::{ExpoIn, ExpoOut, Tweener};
 
 pub enum AnimationState {
@@ -22,49 +23,131 @@ pub enum AnimationState {
 	Contract(Tweener<f32, f32, ExpoIn>),
 }
 
-type Query = (
-	ReparentableProxy<'static>,
-	Option<ReparentLockProxy<'static>>,
-);
+#[derive(Debug, Handler)]
+struct PointsHandler {
+	in_zone: Mutex<FxHashMap<QueryableObjectRef, ReparentableProxy>>,
+}
+impl PointsQueryHandlerHandler for PointsHandler {
+	async fn entered(
+		&self,
+		_ctx: gluon::Context,
+		obj: QueryableObjectRef,
+		_field: FieldRef,
+		_spatial: SpatialRef,
+		interfaces: Vec<QueriedInterface>,
+		_spatial_info: FieldSample,
+	) {
+		tracing::info!(?obj, ?interfaces, "black hole: object entered center point");
+		let Some(reparentable) = interfaces
+			.iter()
+			.find(|i| i.interface_id == REPARENTABLE_PROTOCOL.protocol_name)
+			.map(|i| ReparentableProxy::from_object_or_ref(i.interface.clone()))
+		else {
+			return;
+		};
+		self.in_zone.lock().unwrap().insert(obj, reparentable);
+	}
+	async fn interfaces_changed(
+		&self,
+		_ctx: gluon::Context,
+		obj: QueryableObjectRef,
+		interfaces: Vec<QueriedInterface>,
+	) {
+		tracing::info!(?obj, ?interfaces, "black hole: object interfaces changed");
+	}
+	async fn moved(
+		&self,
+		_ctx: gluon::Context,
+		_obj: QueryableObjectRef,
+		_spatial_info: FieldSample,
+	) {
+	}
+	async fn left(&self, _ctx: gluon::Context, obj: QueryableObjectRef) {
+		tracing::info!(?obj, "black hole: object left center point");
+		self.in_zone.lock().unwrap().remove(&obj);
+	}
+}
+
+#[derive(Debug, Handler)]
+struct BlackHoleKeepalive;
+impl ReparentKeepaliveHandler for BlackHoleKeepalive {
+	async fn reparent_stolen(&self, _ctx: gluon::Context) {}
+}
+
 pub struct BlackHole {
+	root: SpatialRef,
 	target_spatial: Spatial,
+	target_ref: SpatialRef,
 	reparent_spatial: Spatial,
-	spatial_id: u64,
-	query: ObjectQuery<Query, ()>,
+	reparent_ref: SpatialRef,
+	// kept permanently at scale 1, tracking target_spatial's position, so the query's
+	// reach never collapses along with target_spatial's animated 0..1 scale
+	query_spatial: Spatial,
+	_points_handle: PointsQueryHandle,
+	points: gluon::Object<PointsHandler>,
 	_visuals: Model,
 	open: bool,
 	animation_state: AnimationState,
-	reparentable: FxHashMap<ObjectInfo, Query>,
-	captured: FxHashMap<ObjectInfo, Query>,
+	captured: FxHashMap<QueryableObjectRef, gluon::Object<BlackHoleKeepalive>>,
 }
 impl BlackHole {
-	pub async fn new(
-		spatial_parent: &impl SpatialRefAspect,
-		object_registry: Arc<ObjectRegistry>,
-	) -> NodeResult<BlackHole> {
-		let target_spatial = Spatial::create(spatial_parent, Transform::identity())?;
-		let spatial = Spatial::create(&target_spatial, Transform::identity())?;
-		let spatial_id = spatial.export_spatial().await?;
-		let query = ObjectQuery::new(object_registry, ());
+	pub async fn new<H: ClientHandler>(
+		client: &Client<H>,
+		spatial_parent: &SpatialRef,
+	) -> Result<BlackHole> {
+		let (target_spatial, target_ref) =
+			Spatial::new(client, spatial_parent, Transform::from_scale([0.0; 3])).await?;
+		let (reparent_spatial, reparent_ref) =
+			Spatial::new(client, &target_ref, Transform::IDENTITY).await?;
+		let (query_spatial, query_ref) =
+			Spatial::new(client, spatial_parent, Transform::IDENTITY).await?;
 
-		let _visuals = Model::create(
+		// a single point at the black hole's center, with a huge margin so it still
+		// catches everything reparentable regardless of distance, like a black hole should
+		let points = client.pion_device().register_object(PointsHandler {
+			in_zone: Mutex::default(),
+		});
+		let _points_handle = client
+			.spatial_query_interface()
+			.points_query(PointsQuery {
+				handler: PointsQueryHandler::from_handler(&points),
+				interfaces: vec![InterfaceDependency {
+					id: REPARENTABLE_PROTOCOL.protocol_name.into(),
+					optional: false,
+				}],
+				reference_spatial: query_ref.clone(),
+				points: vec![Point {
+					point: [0.0, 0.0, 0.0].into(),
+					margin: f32::MAX,
+				}],
+			})
+			.await?
+			.unwrap();
+		tracing::info!("black hole: points query registered, watching for reparentable objects");
+
+		let _visuals = Model::new(
+			client,
 			&target_spatial,
-			Transform::from_scale([10.0; 3]),
-			&ResourceID::new_namespaced("black_hole", "black_hole"),
-		)?;
-
-		target_spatial.set_local_transform(Transform::from_scale([0.0; 3]))?;
+			Resource::Namespaced {
+				namespace: "org.stardustxr.BlackHole".into(),
+				path: "black_hole".into(),
+			},
+		)
+		.await?;
 
 		Ok(BlackHole {
-			reparent_spatial: spatial,
-			spatial_id,
-			query,
+			root: client.root().clone(),
+			target_spatial,
+			target_ref,
+			reparent_spatial,
+			reparent_ref,
+			query_spatial,
+			_points_handle,
+			points,
 			_visuals,
 			open: true,
 			animation_state: AnimationState::Idle,
-			reparentable: FxHashMap::default(),
 			captured: FxHashMap::default(),
-			target_spatial,
 		})
 	}
 	pub fn open(&self) -> bool {
@@ -73,27 +156,10 @@ impl BlackHole {
 	pub fn in_transition(&self) -> bool {
 		!matches!(&self.animation_state, AnimationState::Idle)
 	}
-	pub fn frame(&mut self, info: &FrameInfo) {
-		while let Ok(event) = self.query.try_recv_event() {
-			match event {
-				QueryEvent::NewMatch(object_info, reparentable) => {
-					self.reparentable.insert(object_info, reparentable);
-				}
-				QueryEvent::MatchModified(object_info, reparentable) => {
-					self.reparentable.insert(object_info, reparentable);
-				}
-				QueryEvent::MatchLost(object_info) => {
-					self.reparentable.remove(&object_info);
-				}
-				QueryEvent::PhantomVariant(_) => (),
-			}
-		}
+	pub fn frame<H: ClientHandler>(&mut self, client: &Client<H>, info: &FrameInfo) {
 		match &mut self.animation_state {
 			AnimationState::Expand(e) => {
-				let _ = self._visuals.set_enabled(true);
 				let scale = e.move_by(info.delta);
-
-				// Apply scale to the spatial transform
 				let _ = self
 					.target_spatial
 					.set_local_transform(Transform::from_scale([scale.max(0.0); 3]));
@@ -103,36 +169,28 @@ impl BlackHole {
 						AnimationState::Contract(Tweener::expo_in_at(1.0, 0.0, 0.25, 0.0));
 
 					if self.open {
-						// Opening: release captured objects back to their original parents
-						for (_, (reparentable, locked)) in self.captured.drain() {
-							if let Some(locked) = locked {
-								tokio::spawn(async move {
-									_ = locked.unlock().await;
-									_ = reparentable.unparent().await;
-								});
-							} else {
-								tokio::spawn(async move {
-									_ = reparentable.unparent().await;
-								});
-							}
-						}
+						// opening: drop the locks, the reparentable objects take care of
+						// putting themselves back where they belong on their own
+						self.captured.clear();
 					} else {
-						// Closing: capture all available reparentable objects
-						for (object_info, (reparentable, locked)) in self.reparentable.iter() {
-							let reparentable = reparentable.clone();
-							let locked = locked.clone();
-							let spatial_id = self.spatial_id;
+						// closing: capture everything currently reparentable
+						let in_zone: Vec<_> = self
+							.points
+							.in_zone
+							.lock()
+							.unwrap()
+							.iter()
+							.map(|(k, v)| (k.clone(), v.clone()))
+							.collect();
+						for (key, reparentable) in in_zone {
+							let keepalive_obj =
+								client.pion_device().register_object(BlackHoleKeepalive);
+							let keepalive = ReparentKeepalive::from_handler(&keepalive_obj);
+							self.captured.insert(key, keepalive_obj);
 
-							self.captured.insert(
-								object_info.clone(),
-								(reparentable.clone(), locked.clone()),
-							);
-
+							let reparent_ref = self.reparent_ref.clone();
 							tokio::spawn(async move {
-								if let Some(locked) = &locked {
-									_ = locked.lock().await;
-								}
-								_ = reparentable.parent(spatial_id).await;
+								_ = reparentable.reparent_locking(reparent_ref, keepalive).await;
 							});
 						}
 					}
@@ -140,33 +198,31 @@ impl BlackHole {
 			}
 			AnimationState::Contract(c) => {
 				let scale = c.move_by(info.delta);
-
-				// Apply scale to the spatial transform
 				let _ = self
 					.target_spatial
 					.set_local_transform(Transform::from_scale([scale.max(0.0); 3]));
 
 				if c.is_finished() {
-					let _ = self._visuals.set_enabled(false);
 					self.animation_state = AnimationState::Idle;
 				}
 			}
 			_ => (),
 		};
 	}
-	pub fn toggle(&mut self, target: &impl SpatialRefAspect) {
+	pub fn toggle(&mut self, target: &SpatialRef) {
+		_ = self
+			.query_spatial
+			.set_relative_transform(target.clone(), Transform::from_translation(Vec3::ZERO));
 		_ = self
 			.target_spatial
 			.set_local_transform(Transform::from_scale(Vec3::ONE));
-		_ = self
-			.reparent_spatial
-			.set_spatial_parent_in_place(self.reparent_spatial.client().get_root());
+		_ = self.reparent_spatial.set_parent_in_place(self.root.clone());
 		_ = self
 			.target_spatial
-			.set_relative_transform(target, Transform::from_translation(Vec3::ZERO));
+			.set_relative_transform(target.clone(), Transform::from_translation(Vec3::ZERO));
 		_ = self
 			.reparent_spatial
-			.set_spatial_parent_in_place(&self.target_spatial);
+			.set_parent_in_place(self.target_ref.clone());
 		_ = self
 			.target_spatial
 			.set_local_transform(Transform::from_scale(if self.open {
