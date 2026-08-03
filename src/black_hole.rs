@@ -1,5 +1,5 @@
 use glam::Vec3;
-use gluon::Handler;
+use gluon::{Handler, Interface};
 use rustc_hash::FxHashMap;
 use stardust_xr_fusion::{
 	client::{Client, ClientHandler, FrameInfo},
@@ -12,7 +12,7 @@ use stardust_xr_fusion::{
 	Result,
 };
 use stardust_xr_molecules::reparentable::{
-	ReparentKeepalive, ReparentKeepaliveHandler, ReparentableProxy, REPARENTABLE_PROTOCOL,
+	ReparentKeepalive, ReparentKeepaliveHandler, ReparentableProxy, ReparentableLockedProxy,
 };
 use std::sync::Mutex;
 use tween::{ExpoIn, ExpoOut, Tweener};
@@ -25,7 +25,7 @@ pub enum AnimationState {
 
 #[derive(Debug, Handler)]
 struct PointsHandler {
-	in_zone: Mutex<FxHashMap<QueryableObjectRef, ReparentableProxy>>,
+	in_zone: Mutex<FxHashMap<QueryableObjectRef, (ReparentableProxy, ReparentableLockedProxy)>>,
 }
 impl PointsQueryHandlerHandler for PointsHandler {
 	async fn entered(
@@ -40,12 +40,22 @@ impl PointsQueryHandlerHandler for PointsHandler {
 		tracing::info!(?obj, ?interfaces, "black hole: object entered center point");
 		let Some(reparentable) = interfaces
 			.iter()
-			.find(|i| i.interface_id == REPARENTABLE_PROTOCOL.protocol_name)
+			.find(|i| i.interface_id == ReparentableProxy::ID)
 			.map(|i| ReparentableProxy::from_object_or_ref(i.interface.clone()))
 		else {
 			return;
 		};
-		self.in_zone.lock().unwrap().insert(obj, reparentable);
+		let Some(reparentable_locked) = interfaces
+			.iter()
+			.find(|i| i.interface_id == ReparentableLockedProxy::ID)
+			.map(|i| ReparentableLockedProxy::from_object_or_ref(i.interface.clone()))
+		else {
+			return;
+		};
+		self.in_zone
+			.lock()
+			.unwrap()
+			.insert(obj, (reparentable, reparentable_locked));
 	}
 	async fn interfaces_changed(
 		&self,
@@ -112,7 +122,11 @@ impl BlackHole {
 			.points_query(PointsQuery {
 				handler: PointsQueryHandler::from_handler(&points),
 				interfaces: vec![InterfaceDependency {
-					id: REPARENTABLE_PROTOCOL.protocol_name.into(),
+					id: ReparentableProxy::ID.into(),
+					optional: false,
+				},
+				InterfaceDependency {
+					id: ReparentableLockedProxy::ID.into(),
 					optional: false,
 				}],
 				reference_spatial: query_ref.clone(),
@@ -182,7 +196,7 @@ impl BlackHole {
 							.iter()
 							.map(|(k, v)| (k.clone(), v.clone()))
 							.collect();
-						for (key, reparentable) in in_zone {
+						for (key, (_reparentable, reparentable_locked)) in in_zone {
 							let keepalive_obj =
 								client.pion_device().register_object(BlackHoleKeepalive);
 							let keepalive = ReparentKeepalive::from_handler(&keepalive_obj);
@@ -190,7 +204,9 @@ impl BlackHole {
 
 							let reparent_ref = self.reparent_ref.clone();
 							tokio::spawn(async move {
-								_ = reparentable.reparent_locking(reparent_ref, keepalive).await;
+								_ = reparentable_locked
+									.reparent_locking(reparent_ref, keepalive)
+									.await;
 							});
 						}
 					}
