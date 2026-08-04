@@ -21,10 +21,81 @@ use std::sync::Mutex;
 use tokio::sync::mpsc;
 use tween::{ExpoIn, ExpoOut, Tweener};
 
-pub enum AnimationState {
-	Idle,
+/// Cosmetic pulse for the black hole's visuals: always grows out then shrinks back,
+/// regardless of whether this is an opening or closing transition. Carried inside
+/// `AnimationState` but kept separate from the `target` tween so it can keep animating
+/// (or finish sooner/later) independently of the scale reparented objects inherit.
+pub enum VisualPulse {
 	Expand(Tweener<f32, f32, ExpoOut>),
 	Contract(Tweener<f32, f32, ExpoIn>),
+}
+/// Reports how the pulse changed on this frame: whether it just crossed its apex
+/// (Expand finished, Contract about to begin) and whether it has fully finished.
+struct PulseProgress {
+	apex_reached: bool,
+	finished: bool,
+}
+impl VisualPulse {
+	fn advance(&mut self, visual_spatial: &Spatial, delta: f32) -> PulseProgress {
+		match self {
+			VisualPulse::Expand(e) => {
+				let scale = e.move_by(delta);
+				let _ = visual_spatial
+					.set_local_transform(PartialTransform::from_scale([scale.max(0.0); 3]));
+				if e.is_finished() {
+					*self = VisualPulse::Contract(Tweener::expo_in_at(1.0, 0.0, 0.25, 0.0));
+					return PulseProgress {
+						apex_reached: true,
+						finished: false,
+					};
+				}
+				PulseProgress {
+					apex_reached: false,
+					finished: false,
+				}
+			}
+			VisualPulse::Contract(c) => {
+				let scale = c.move_by(delta);
+				let _ = visual_spatial
+					.set_local_transform(PartialTransform::from_scale([scale.max(0.0); 3]));
+				PulseProgress {
+					apex_reached: false,
+					finished: c.is_finished(),
+				}
+			}
+		}
+	}
+}
+
+/// While closing, `target_spatial` doesn't start shrinking the instant the button is
+/// pressed — it waits until the cosmetic pulse reaches its apex (matching how the old,
+/// single-tween version only started contracting once its Expand half finished), then
+/// shrinks in sync with the pulse's Contract half and holds at zero once done.
+pub enum ClosingTarget {
+	Pending,
+	Shrinking(Tweener<f32, f32, ExpoIn>),
+	Done,
+}
+
+/// Single state machine driving both `target_spatial`'s scale (which reparented objects
+/// inherit) and the cosmetic visual pulse. `target` only ever moves toward the current
+/// `open` state and then settles — it never animates back down on its own the way the
+/// old Expand-then-auto-Contract pulse did. That means once an "opening" transition's
+/// `target` tween finishes, anything still parented under `target_spatial` (including
+/// handles that finish reparenting late, after a race with the network) is at the
+/// correct full scale and *stays* there indefinitely, instead of racing a fixed-duration
+/// contract back down to zero. The overall variant only transitions to `Idle` once
+/// `target` has settled and the cosmetic pulse has finished.
+pub enum AnimationState {
+	Idle,
+	Opening {
+		target: Option<Tweener<f32, f32, ExpoOut>>,
+		visual: VisualPulse,
+	},
+	Closing {
+		target: ClosingTarget,
+		visual: VisualPulse,
+	},
 }
 
 #[derive(Debug, Handler)]
@@ -98,6 +169,9 @@ pub struct BlackHole {
 	// kept permanently at scale 1, tracking target_spatial's position, so the query's
 	// reach never collapses along with target_spatial's animated 0..1 scale
 	query_spatial: Spatial,
+	// tracks target_spatial's position but carries its own independent pulse tween for
+	// the visuals model, uncoupled from the capture/release scale above
+	visual_spatial: Spatial,
 	_points_handle: PointsQueryHandle,
 	points: gluon::Object<PointsHandler>,
 	_visuals: Model,
@@ -119,6 +193,8 @@ impl BlackHole {
 			Spatial::new(client, &target_ref, Transform::IDENTITY).await?;
 		let (query_spatial, query_ref) =
 			Spatial::new(client, spatial_parent, Transform::IDENTITY).await?;
+		let (visual_spatial, _visual_ref) =
+			Spatial::new(client, spatial_parent, Transform::from_scale([0.0; 3])).await?;
 
 		// a single point at the black hole's center, with a huge margin so it still
 		// catches everything reparentable regardless of distance, like a black hole should
@@ -151,7 +227,7 @@ impl BlackHole {
 
 		let _visuals = Model::new(
 			client,
-			&target_spatial,
+			&visual_spatial,
 			Resource::Namespaced {
 				namespace: "org.stardustxr.BlackHole".into(),
 				path: "black_hole".into(),
@@ -167,6 +243,7 @@ impl BlackHole {
 			reparent_spatial,
 			reparent_ref,
 			query_spatial,
+			visual_spatial,
 			_points_handle,
 			points,
 			_visuals,
@@ -184,71 +261,57 @@ impl BlackHole {
 	}
 	pub fn frame<H: ClientHandler>(&mut self, _client: &Client<H>, info: &FrameInfo) {
 		match &mut self.animation_state {
-			AnimationState::Expand(e) => {
-				let scale = e.move_by(info.delta);
-				let _ = self
-					.target_spatial
-					.set_local_transform(PartialTransform::from_scale([scale.max(0.0); 3]));
+			AnimationState::Opening { target, visual } => {
+				if let Some(e) = target {
+					let scale = e.move_by(info.delta);
+					let _ = self
+						.target_spatial
+						.set_local_transform(PartialTransform::from_scale([scale.max(0.0); 3]));
 
-				if e.is_finished() {
-					self.animation_state =
-						AnimationState::Contract(Tweener::expo_in_at(1.0, 0.0, 0.25, 0.0));
-
-					if self.open {
-						// self.reparent_spatial.set_relative_transform(
-						// 	self.root.clone(),
-						// 	PartialTransform::from_scale([1.0; 3]),
-						// );
-						//                   sleep(Duration::from_millis(100));
-						// opening: drop the locks, the reparentable objects take care of
-						// putting themselves back where they belong on their own
+					if e.is_finished() {
+						*target = None;
+						// fully open and holding: since target_spatial no longer
+						// auto-contracts back down afterward, it's now safe to drop the
+						// locks, even for a handle that finishes reparenting late (the
+						// object it belongs to will still bake in the correct full scale
+						// whenever that lands, instead of racing a shrink back to zero)
 						self.captured = mpsc::unbounded_channel();
 						tracing::info!("dropping all captures");
-					} else {
-						// closing: capture everything currently reparentable
-						let in_zone: Vec<_> = self
-							.points
-							.in_zone
-							.lock()
-							.unwrap()
-							.iter()
-							.map(|(k, v)| (k.clone(), v.clone()))
-							.collect();
-						for (_, (_reparentable, reparentable_locked)) in in_zone {
-							let keepalive =
-								ReparentKeepalive::from_handler(&self.reparent_keepalive);
-							let sender = self.captured.0.clone();
-							let reparent_ref = self.reparent_ref.clone();
-							tokio::spawn(async move {
-								let Some(handle) = reparentable_locked
-									.reparent_locking(reparent_ref, keepalive)
-									.await
-									.ok()
-									.flatten()
-								else {
-									return;
-								};
-								_ = sender.send(handle);
-							});
-						}
 					}
 				}
-			}
-			AnimationState::Contract(c) => {
-				let scale = c.move_by(info.delta);
-				let _ = self
-					.target_spatial
-					.set_local_transform(PartialTransform::from_scale([scale.max(0.0); 3]));
-
-				if c.is_finished() {
+				let progress = visual.advance(&self.visual_spatial, info.delta);
+				if target.is_none() && progress.finished {
 					self.animation_state = AnimationState::Idle;
 				}
 			}
-			_ => (),
+			AnimationState::Closing { target, visual } => {
+				let progress = visual.advance(&self.visual_spatial, info.delta);
+				if progress.apex_reached && matches!(target, ClosingTarget::Pending) {
+					*target = ClosingTarget::Shrinking(Tweener::expo_in_at(1.0, 0.0, 0.25, 0.0));
+				}
+				if let ClosingTarget::Shrinking(c) = target {
+					let scale = c.move_by(info.delta);
+					let _ = self
+						.target_spatial
+						.set_local_transform(PartialTransform::from_scale([scale.max(0.0); 3]));
+
+					if c.is_finished() {
+						*target = ClosingTarget::Done;
+					}
+				}
+				if matches!(target, ClosingTarget::Done) && progress.finished {
+					self.animation_state = AnimationState::Idle;
+				}
+			}
+			AnimationState::Idle => (),
 		};
 	}
 	pub fn toggle(&mut self, target: &SpatialRef) {
 		_ = self.query_spatial.set_relative_transform(
+			target.clone(),
+			PartialTransform::from_translation(Vec3::ZERO),
+		);
+		_ = self.visual_spatial.set_relative_transform(
 			target.clone(),
 			PartialTransform::from_translation(Vec3::ZERO),
 		);
@@ -270,7 +333,47 @@ impl BlackHole {
 			} else {
 				Vec3::ZERO
 			}));
+
+		let visual = VisualPulse::Expand(Tweener::expo_out_at(0.0, 1.0, 0.25, 0.0));
+		if self.open {
+			// closing: capture everything currently reparentable right now, while
+			// target_spatial is still at full scale, so captured objects shrink
+			// smoothly along with it instead of popping to whatever scale it happens
+			// to be at once the reparent RPC resolves
+			let in_zone: Vec<_> = self
+				.points
+				.in_zone
+				.lock()
+				.unwrap()
+				.iter()
+				.map(|(k, v)| (k.clone(), v.clone()))
+				.collect();
+			for (_, (_reparentable, reparentable_locked)) in in_zone {
+				let keepalive = ReparentKeepalive::from_handler(&self.reparent_keepalive);
+				let sender = self.captured.0.clone();
+				let reparent_ref = self.reparent_ref.clone();
+				tokio::spawn(async move {
+					let Some(handle) = reparentable_locked
+						.reparent_locking(reparent_ref, keepalive)
+						.await
+						.ok()
+						.flatten()
+					else {
+						return;
+					};
+					_ = sender.send(handle);
+				});
+			}
+			self.animation_state = AnimationState::Closing {
+				target: ClosingTarget::Pending,
+				visual,
+			};
+		} else {
+			self.animation_state = AnimationState::Opening {
+				target: Some(Tweener::expo_out_at(0.0, 1.0, 0.25, 0.0)),
+				visual,
+			};
+		}
 		self.open = !self.open;
-		self.animation_state = AnimationState::Expand(Tweener::expo_out_at(0.0, 1.0, 0.25, 0.0));
 	}
 }
