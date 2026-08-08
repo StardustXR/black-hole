@@ -18,7 +18,7 @@ use stardust_xr_molecules::reparentable::{
 	ReparentableProxy,
 };
 use std::sync::Mutex;
-use tokio::sync::mpsc;
+use tokio::task::JoinSet;
 use tween::{ExpoIn, ExpoOut, Tweener};
 
 /// Cosmetic pulse for the black hole's visuals: always grows out then shrinks back,
@@ -177,10 +177,7 @@ pub struct BlackHole {
 	_visuals: Model,
 	open: bool,
 	animation_state: AnimationState,
-	captured: (
-		mpsc::UnboundedSender<ReparentHandle>,
-		mpsc::UnboundedReceiver<ReparentHandle>,
-	),
+	captured: Option<Vec<Option<ReparentHandle>>>,
 }
 impl BlackHole {
 	pub async fn new<H: ClientHandler>(
@@ -249,7 +246,7 @@ impl BlackHole {
 			_visuals,
 			open: true,
 			animation_state: AnimationState::Idle,
-			captured: mpsc::unbounded_channel(),
+			captured: None,
 			reparent_keepalive,
 		})
 	}
@@ -275,7 +272,7 @@ impl BlackHole {
 						// locks, even for a handle that finishes reparenting late (the
 						// object it belongs to will still bake in the correct full scale
 						// whenever that lands, instead of racing a shrink back to zero)
-						self.captured = mpsc::unbounded_channel();
+						self.captured.take();
 						tracing::info!("dropping all captures");
 					}
 				}
@@ -306,33 +303,40 @@ impl BlackHole {
 			AnimationState::Idle => (),
 		};
 	}
-	pub fn toggle(&mut self, target: &SpatialRef) {
-		_ = self.query_spatial.set_relative_transform(
-			target.clone(),
-			PartialTransform::from_translation(Vec3::ZERO),
-		);
-		_ = self.visual_spatial.set_relative_transform(
-			target.clone(),
-			PartialTransform::from_translation(Vec3::ZERO),
-		);
+	pub async fn toggle(&mut self, target: &SpatialRef) {
+		_ = self
+			.query_spatial
+			.set_relative_transform_waiting(
+				target.clone(),
+				PartialTransform::from_translation(Vec3::ZERO),
+			)
+			.await;
+		_ = self
+			.visual_spatial
+			.set_relative_transform_waiting(
+				target.clone(),
+				PartialTransform::from_translation(Vec3::ZERO),
+			)
+			.await;
 		_ = self
 			.target_spatial
-			.set_local_transform(PartialTransform::from_scale(Vec3::ONE));
-		_ = self.reparent_spatial.set_parent_in_place(self.root.clone());
-		_ = self.target_spatial.set_relative_transform(
-			target.clone(),
-			PartialTransform::from_translation(Vec3::ZERO),
-		);
+			.set_local_transform_waiting(PartialTransform::from_scale(Vec3::ONE))
+			.await;
 		_ = self
 			.reparent_spatial
-			.set_parent_in_place(self.target_ref.clone());
+			.set_parent_in_place_waiting(self.root.clone())
+			.await;
 		_ = self
 			.target_spatial
-			.set_local_transform(PartialTransform::from_scale(if self.open {
-				Vec3::ONE
-			} else {
-				Vec3::ZERO
-			}));
+			.set_relative_transform_waiting(
+				target.clone(),
+				PartialTransform::from_translation(Vec3::ZERO),
+			)
+			.await;
+		_ = self
+			.reparent_spatial
+			.set_parent_in_place_waiting(self.target_ref.clone())
+			.await;
 
 		let visual = VisualPulse::Expand(Tweener::expo_out_at(0.0, 1.0, 0.25, 0.0));
 		if self.open {
@@ -348,22 +352,19 @@ impl BlackHole {
 				.iter()
 				.map(|(k, v)| (k.clone(), v.clone()))
 				.collect();
+			let mut join_set = JoinSet::new();
 			for (_, (_reparentable, reparentable_locked)) in in_zone {
 				let keepalive = ReparentKeepalive::from_handler(&self.reparent_keepalive);
-				let sender = self.captured.0.clone();
 				let reparent_ref = self.reparent_ref.clone();
-				tokio::spawn(async move {
-					let Some(handle) = reparentable_locked
+				join_set.spawn(async move {
+					reparentable_locked
 						.reparent_locking(reparent_ref, keepalive)
 						.await
 						.ok()
 						.flatten()
-					else {
-						return;
-					};
-					_ = sender.send(handle);
 				});
 			}
+			self.captured.replace(join_set.join_all().await);
 			self.animation_state = AnimationState::Closing {
 				target: ClosingTarget::Pending,
 				visual,

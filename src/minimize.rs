@@ -18,7 +18,7 @@ pub struct MinimizeButton {
 	black_hole_was_open: bool,
 }
 impl MinimizeButton {
-	pub fn frame(&mut self, black_hole: &mut BlackHole) {
+	pub async fn frame(&mut self, black_hole: &mut BlackHole) {
 		if black_hole.open() != self.black_hole_was_open {
 			let _ = self
 				.text
@@ -27,7 +27,7 @@ impl MinimizeButton {
 		}
 		self.button.handle_events();
 		if self.button.released() && !black_hole.in_transition() {
-			black_hole.toggle(&self.button_ref);
+			black_hole.toggle(&self.button_ref).await;
 		}
 	}
 

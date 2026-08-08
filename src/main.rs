@@ -46,15 +46,14 @@ async fn main() {
 			.await
 			.expect("Unable to create minimize button");
 		buttons.push((button, Some(handle)));
-        // xr_found = true;
+		xr_found = true;
 	}
-	if let Some((anchor, transform, handle)) = hand_transform(&client, Chirality::Left).await
-	{
+	if let Some((anchor, transform, handle)) = hand_transform(&client, Chirality::Left).await {
 		let button = MinimizeButton::new(&client, &anchor, transform)
 			.await
 			.expect("Unable to create minimize button");
 		buttons.push((button, Some(handle)));
-        // xr_found = true;
+		xr_found = true;
 	}
 	if !xr_found {
 		let button = MinimizeButton::new(
@@ -83,7 +82,7 @@ async fn main() {
 
 		black_hole.frame(&client, &info);
 		for (button, _) in buttons.iter_mut() {
-			button.frame(&mut black_hole);
+			button.frame(&mut black_hole).await;
 		}
 	}
 }
