@@ -1,12 +1,12 @@
 use glam::Vec3;
-use gluon::{Handler, Interface};
+use gluon::{Handler, Interface, LocalRef, Node, RefExt};
 use rustc_hash::FxHashMap;
 use stardust_xr_fusion::{
 	Result,
 	client::{Client, ClientHandler, FrameInfo},
 	drawable::{Model, ModelExt},
 	fields::{FieldRef, FieldSample},
-	query::{InterfaceDependency, QueriedInterface, QueryableObjectRef},
+	query::{InterfaceDependency, QueriedInterface, QueryableId},
 	spatial::{PartialTransform, Spatial, SpatialExt, SpatialRef, Transform},
 	spatial_query::{
 		Point, PointsQuery, PointsQueryHandle, PointsQueryHandler, PointsQueryHandlerHandler,
@@ -100,56 +100,50 @@ pub enum AnimationState {
 
 #[derive(Debug, Handler)]
 struct PointsHandler {
-	in_zone: Mutex<FxHashMap<QueryableObjectRef, (ReparentableProxy, ReparentableLockedProxy)>>,
+	in_zone: Mutex<FxHashMap<QueryableId, (ReparentableProxy, ReparentableLockedProxy)>>,
 }
 impl PointsQueryHandlerHandler for PointsHandler {
 	async fn entered(
 		&self,
 		_ctx: gluon::Context,
-		obj: QueryableObjectRef,
+		id: QueryableId,
 		_field: FieldRef,
 		_spatial: SpatialRef,
 		interfaces: Vec<QueriedInterface>,
 		_spatial_info: FieldSample,
 	) {
-		tracing::info!(?obj, ?interfaces, "black hole: object entered center point");
+		tracing::info!(?id, ?interfaces, "black hole: object entered center point");
 		let Some(reparentable) = interfaces
 			.iter()
 			.find(|i| i.interface_id == ReparentableProxy::ID)
-			.map(|i| ReparentableProxy::from_object_or_ref(i.interface.clone()))
+			.map(|i| ReparentableProxy::from_ref(i.interface.clone()))
 		else {
 			return;
 		};
 		let Some(reparentable_locked) = interfaces
 			.iter()
 			.find(|i| i.interface_id == ReparentableLockedProxy::ID)
-			.map(|i| ReparentableLockedProxy::from_object_or_ref(i.interface.clone()))
+			.map(|i| ReparentableLockedProxy::from_ref(i.interface.clone()))
 		else {
 			return;
 		};
 		self.in_zone
 			.lock()
 			.unwrap()
-			.insert(obj, (reparentable, reparentable_locked));
+			.insert(id, (reparentable, reparentable_locked));
 	}
 	async fn interfaces_changed(
 		&self,
 		_ctx: gluon::Context,
-		obj: QueryableObjectRef,
+		id: QueryableId,
 		interfaces: Vec<QueriedInterface>,
 	) {
-		tracing::info!(?obj, ?interfaces, "black hole: object interfaces changed");
+		tracing::info!(?id, ?interfaces, "black hole: object interfaces changed");
 	}
-	async fn moved(
-		&self,
-		_ctx: gluon::Context,
-		_obj: QueryableObjectRef,
-		_spatial_info: FieldSample,
-	) {
-	}
-	async fn left(&self, _ctx: gluon::Context, obj: QueryableObjectRef) {
-		tracing::info!(?obj, "black hole: object left center point");
-		self.in_zone.lock().unwrap().remove(&obj);
+	async fn moved(&self, _ctx: gluon::Context, _id: QueryableId, _spatial_info: FieldSample) {}
+	async fn left(&self, _ctx: gluon::Context, id: QueryableId) {
+		tracing::info!(?id, "black hole: object left center point");
+		self.in_zone.lock().unwrap().remove(&id);
 	}
 }
 
@@ -165,7 +159,8 @@ pub struct BlackHole {
 	target_ref: SpatialRef,
 	reparent_spatial: Spatial,
 	reparent_ref: SpatialRef,
-	reparent_keepalive: gluon::Object<BlackHoleKeepalive>,
+	_reparent_keepalive: Node<BlackHoleKeepalive>,
+	reparent_keepalive_ref: LocalRef<ReparentKeepalive, BlackHoleKeepalive>,
 	// kept permanently at scale 1, tracking target_spatial's position, so the query's
 	// reach never collapses along with target_spatial's animated 0..1 scale
 	query_spatial: Spatial,
@@ -173,7 +168,7 @@ pub struct BlackHole {
 	// the visuals model, uncoupled from the capture/release scale above
 	visual_spatial: Spatial,
 	_points_handle: PointsQueryHandle,
-	points: gluon::Object<PointsHandler>,
+	points_query_handler: Node<PointsHandler>,
 	_visuals: Model,
 	open: bool,
 	animation_state: AnimationState,
@@ -198,13 +193,14 @@ impl BlackHole {
 
 		// a single point at the black hole's center, with a huge margin so it still
 		// catches everything reparentable regardless of distance, like a black hole should
-		let points = client.pion_device().register_object(PointsHandler {
-			in_zone: Mutex::default(),
-		});
+		let (points_query_handler, points_handler_ref) =
+			PointsQueryHandler::new_node(PointsHandler {
+				in_zone: Mutex::default(),
+			})?;
 		let _points_handle = client
 			.spatial_query_interface()
 			.points_query(PointsQuery {
-				handler: PointsQueryHandler::from_handler(&points),
+				handler: points_handler_ref.into_proxy(),
 				interfaces: vec![
 					InterfaceDependency {
 						id: ReparentableProxy::ID.into(),
@@ -235,7 +231,8 @@ impl BlackHole {
 		)
 		.await?;
 
-		let reparent_keepalive = client.pion_device().register_object(BlackHoleKeepalive);
+		let (reparent_keepalive, reparent_keepalive_ref) =
+			ReparentKeepalive::new_node(BlackHoleKeepalive)?;
 		Ok(BlackHole {
 			root: client.root().clone(),
 			target_spatial,
@@ -245,12 +242,13 @@ impl BlackHole {
 			query_spatial,
 			visual_spatial,
 			_points_handle,
-			points,
+			points_query_handler,
 			_visuals,
 			open: true,
 			animation_state: AnimationState::Idle,
 			captured: mpsc::unbounded_channel(),
-			reparent_keepalive,
+			_reparent_keepalive: reparent_keepalive,
+			reparent_keepalive_ref,
 		})
 	}
 	pub fn open(&self) -> bool {
@@ -341,15 +339,15 @@ impl BlackHole {
 			// smoothly along with it instead of popping to whatever scale it happens
 			// to be at once the reparent RPC resolves
 			let in_zone: Vec<_> = self
-				.points
+				.points_query_handler
 				.in_zone
 				.lock()
 				.unwrap()
 				.iter()
-				.map(|(k, v)| (k.clone(), v.clone()))
+				.map(|(k, v)| (*k, v.clone()))
 				.collect();
 			for (_, (_reparentable, reparentable_locked)) in in_zone {
-				let keepalive = ReparentKeepalive::from_handler(&self.reparent_keepalive);
+				let keepalive = self.reparent_keepalive_ref.proxy().clone();
 				let sender = self.captured.0.clone();
 				let reparent_ref = self.reparent_ref.clone();
 				tokio::spawn(async move {

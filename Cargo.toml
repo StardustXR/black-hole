@@ -14,11 +14,12 @@ tween = { version = "2.0.3", features = ["glam"] }
 
 [dependencies.gluon]
 git = "https://github.com/technobaboo/gluon"
+branch = "refactor/strongipc"
 
 [dependencies.stardust-xr-fusion]
 git = "https://github.com/StardustXR/core"
-branch = "binder"
+branch = "refactor/strongipc"
 
 [dependencies.stardust-xr-molecules]
 git = "https://github.com/StardustXR/molecules"
-branch = "binder"
+branch = "refactor/strongipc"

@@ -8,7 +8,7 @@ use std::{
 
 use black_hole::BlackHole;
 use glam::Quat;
-use gluon::{Handler, Liveness, Object};
+use gluon::{Handler, Liveness, Node, RefExt};
 use minimize::MinimizeButton;
 use stardust_xr_fusion::{
 	client::{Client, ClientHandler},
@@ -25,7 +25,7 @@ use tokio::sync::broadcast::error::RecvError;
 async fn main() {
 	tracing_subscriber::fmt().with_file(false).init();
 
-	let (client, root) = Client::auto_connect(&[&project_local_resources!("data")])
+	let (client, root) = Client::connect(&[&project_local_resources!("data")])
 		.await
 		.expect("Unable to connect to server");
 
@@ -39,22 +39,21 @@ async fn main() {
 	// "stardust-hmd" and "stardust-stage" are implemented server-side).
 	// Until then it's always anchored to root.
 	let mut buttons = vec![];
-	let mut xr_found = false;
+	let xr_found = false;
 	if let Some((anchor, transform, handle)) = controller_transform(&client, Chirality::Left).await
 	{
 		let button = MinimizeButton::new(&client, &anchor, transform)
 			.await
 			.expect("Unable to create minimize button");
 		buttons.push((button, Some(handle)));
-        // xr_found = true;
+		// xr_found = true;
 	}
-	if let Some((anchor, transform, handle)) = hand_transform(&client, Chirality::Left).await
-	{
+	if let Some((anchor, transform, handle)) = hand_transform(&client, Chirality::Left).await {
 		let button = MinimizeButton::new(&client, &anchor, transform)
 			.await
 			.expect("Unable to create minimize button");
 		buttons.push((button, Some(handle)));
-        // xr_found = true;
+		// xr_found = true;
 	}
 	if !xr_found {
 		let button = MinimizeButton::new(
@@ -94,8 +93,8 @@ async fn main() {
 pub async fn controller_transform(
 	client: &Client<impl ClientHandler>,
 	chirality: Chirality,
-) -> Option<(SpatialRef, Transform, Object<MinimizingTracked>)> {
-	let tracked = Tracked::controller(client, chirality).await.ok()?;
+) -> Option<(SpatialRef, Transform, Node<MinimizingTracked>)> {
+	let tracked = Tracked::controller(chirality).await.ok()?;
 	let (tracked, anchor) = MinimizingTracked::new(client, tracked).await?;
 
 	Some((
@@ -110,8 +109,8 @@ pub async fn controller_transform(
 pub async fn hand_transform(
 	client: &Client<impl ClientHandler>,
 	chirality: Chirality,
-) -> Option<(SpatialRef, Transform, Object<MinimizingTracked>)> {
-	let tracked = Tracked::hand(client, chirality).await.ok()?;
+) -> Option<(SpatialRef, Transform, Node<MinimizingTracked>)> {
+	let tracked = Tracked::hand(chirality).await.ok()?;
 	let (tracked, anchor) = MinimizingTracked::new(client, tracked).await?;
 
 	Some((
@@ -137,23 +136,22 @@ impl MinimizingTracked {
 	pub async fn new(
 		client: &Client<impl ClientHandler>,
 		tracked: Tracked,
-	) -> Option<(Object<Self>, SpatialRef)> {
+	) -> Option<(Node<Self>, SpatialRef)> {
 		let (spatial, spatial_ref) = Spatial::new(client, client.root(), Transform::IDENTITY)
 			.await
 			.ok()?;
-		let obj = client.pion_device().register_object(Self {
+		let (node, tracked_state_receiver) = TrackedStateReceiver::new_node(Self {
 			spatial,
 			guard: OnceLock::new(),
-		});
-		let (tracked_spatial_ref, guard, tracked) = tracked
-			.get(TrackedStateReceiver::from_handler(&obj))
-			.await
-			.ok()?;
-		obj.spatial.set_parent(tracked_spatial_ref).ok()?;
-		obj.guard.set(guard).unwrap();
-		obj.spatial
+		})
+		.ok()?;
+		let (tracked_spatial_ref, guard, tracked) =
+			tracked.get(tracked_state_receiver).await.ok()?;
+		node.spatial.set_parent(tracked_spatial_ref).ok()?;
+		node.guard.set(guard).unwrap();
+		node.spatial
 			.set_local_transform(PartialTransform::from_scale([tracked as u8 as f32; 3]))
 			.ok()?;
-		Some((obj, spatial_ref))
+		Some((node, spatial_ref))
 	}
 }

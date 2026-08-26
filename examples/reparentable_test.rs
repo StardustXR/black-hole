@@ -7,16 +7,16 @@
 //!
 //! Run with: cargo run --example reparentable_test
 
-use gluon::Handler;
+use gluon::{Handler, Interface, RefExt};
 use stardust_xr_fusion::{
 	client::Client,
 	fields::{Field, FieldExt, FieldRef, FieldSample, Shape},
 	project_local_resources,
-	query::{InterfaceDependency, QueriedInterface, QueryableObjectRef},
+	query::{InterfaceDependency, QueriedInterface, QueryableId},
 	spatial::{Spatial, SpatialExt, SpatialRef, Transform},
 	spatial_query::{Point, PointsQuery, PointsQueryHandler, PointsQueryHandlerHandler},
 };
-use stardust_xr_molecules::reparentable::{Reparentable};
+use stardust_xr_molecules::reparentable::{Reparentable, ReparentableProxy};
 use tokio::sync::broadcast::error::RecvError;
 
 #[derive(Debug, Handler)]
@@ -25,31 +25,25 @@ impl PointsQueryHandlerHandler for Logger {
 	async fn entered(
 		&self,
 		_ctx: gluon::Context,
-		obj: QueryableObjectRef,
+		id: QueryableId,
 		_field: FieldRef,
 		_spatial: SpatialRef,
 		interfaces: Vec<QueriedInterface>,
 		_spatial_info: FieldSample,
 	) {
-		tracing::info!(?obj, ?interfaces, "ENTERED");
+		tracing::info!(?id, ?interfaces, "ENTERED");
 	}
 	async fn interfaces_changed(
 		&self,
 		_ctx: gluon::Context,
-		obj: QueryableObjectRef,
+		id: QueryableId,
 		interfaces: Vec<QueriedInterface>,
 	) {
-		tracing::info!(?obj, ?interfaces, "INTERFACES CHANGED");
+		tracing::info!(?id, ?interfaces, "INTERFACES CHANGED");
 	}
-	async fn moved(
-		&self,
-		_ctx: gluon::Context,
-		_obj: QueryableObjectRef,
-		_spatial_info: FieldSample,
-	) {
-	}
-	async fn left(&self, _ctx: gluon::Context, obj: QueryableObjectRef) {
-		tracing::info!(?obj, "LEFT");
+	async fn moved(&self, _ctx: gluon::Context, _id: QueryableId, _spatial_info: FieldSample) {}
+	async fn left(&self, _ctx: gluon::Context, id: QueryableId) {
+		tracing::info!(?id, "LEFT");
 	}
 }
 
@@ -57,7 +51,7 @@ impl PointsQueryHandlerHandler for Logger {
 async fn main() {
 	tracing_subscriber::fmt().pretty().with_file(false).init();
 
-	let (client, root) = Client::auto_connect(&[&project_local_resources!("res")])
+	let (client, root) = Client::connect(&[&project_local_resources!("res")])
 		.await
 		.expect("Unable to connect to server");
 
@@ -74,13 +68,13 @@ async fn main() {
 	tracing::info!("dummy reparentable object registered at root");
 
 	// consumer: a points query with a single point at root, looking for Reparentable objects
-	let handler = client.pion_device().register_object(Logger);
+	let (_logger_handler, logger_ref) = PointsQueryHandler::new_node(Logger).unwrap();
 	let _query = client
 		.spatial_query_interface()
 		.points_query(PointsQuery {
-			handler: PointsQueryHandler::from_handler(&handler),
+			handler: logger_ref.into_proxy(),
 			interfaces: vec![InterfaceDependency {
-				id: REPARENTABLE_PROTOCOL.protocol_name.into(),
+				id: ReparentableProxy::ID.to_string(),
 				optional: false,
 			}],
 			reference_spatial: root.clone(),
