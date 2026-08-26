@@ -1040,7 +1040,7 @@ dependencies = [
 [[package]]
 name = "stardust-xr-molecules"
 version = "0.51.0"
-source = "git+https://github.com/StardustXR/molecules?branch=refactor%2Fstrongipc#a4f1b8d46142130c555c662c12c7556da7862ee1"
+source = "git+https://github.com/StardustXR/molecules?branch=refactor%2Fstrongipc#5179998f340ccdc6a93db78ad3e2f77d8ff6519f"
 dependencies = [
  "futures",
  "glam 0.29.3",
@@ -1061,7 +1061,7 @@ dependencies = [
 [[package]]
 name = "stardust-xr-molecules-protocols"
 version = "0.1.0"
-source = "git+https://github.com/StardustXR/molecules?branch=refactor%2Fstrongipc#a4f1b8d46142130c555c662c12c7556da7862ee1"
+source = "git+https://github.com/StardustXR/molecules?branch=refactor%2Fstrongipc#5179998f340ccdc6a93db78ad3e2f77d8ff6519f"
 dependencies = [
  "gluon",
  "gluon-codegen",
