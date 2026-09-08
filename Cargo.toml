@@ -5,7 +5,6 @@ edition = "2024"
 
 [dependencies]
 glam = { version = "0.30.8", features = ["mint"] }
-rustc-hash = "2.0.0"
 tokio = { version = "1.38.0", default-features = false, features = ["rt"] }
 tokio-stream = { version = "0.1.17", features = ["signal"] }
 tracing = "0.1.41"

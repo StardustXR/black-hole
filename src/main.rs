@@ -80,9 +80,9 @@ async fn main() {
 			_ = server.death_notification() => break,
 		};
 
-		black_hole.frame(&client, &info);
+		black_hole.frame(&info);
 		for (button, _) in buttons.iter_mut() {
-			button.frame(&mut black_hole);
+			button.frame(&mut black_hole).await;
 		}
 	}
 }
