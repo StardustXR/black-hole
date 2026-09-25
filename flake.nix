@@ -1,17 +1,21 @@
 {
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    crane = {
-      inputs.nixpkgs.follows = "nixpkgs";
-      url = "github:ipetkov/crane";
+    crane.url = "github:ipetkov/crane";
+    rust-overlay = {
+        url = "github:oxalica/rust-overlay";
+        inputs.nixpkgs.follows = "nixpkgs";
     };
   };
 
 
-  outputs = { self, nixpkgs, crane }:
+  outputs = { self, nixpkgs, crane, rust-overlay }:
   let supportedSystems = [ "aarch64-linux" "x86_64-linux" ];
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
-      nixpkgsFor = forAllSystems (system: import nixpkgs { inherit system; });
+      nixpkgsFor = forAllSystems (system: import nixpkgs {
+          inherit system;
+          overlays = [ rust-overlay.overlays.default ];
+      });
   in {
     packages = forAllSystems (system: let pkgs = nixpkgsFor.${system}; in {
       default =
@@ -21,15 +25,16 @@
       });
       in craneLib.buildPackage {
         src = ./.;
+        cargoLock = ./Cargo.lock;
 
         CARGO_BUILD_TARGET = "x86_64-unknown-linux-musl";
         CARGO_BUILD_RUSTFLAGS = "-C target-feature=+crt-static";
 
         STARDUST_RES_PREFIXES = pkgs.stdenvNoCC.mkDerivation {
-          name = "resources";
+          name = "data";
           src = ./.;
 
-          buildPhase = "cp -r $src/res $out";
+          buildPhase = "cp -r $src/data $out";
         };
       };
     });
