@@ -8,7 +8,7 @@ use std::{
 
 use black_hole::BlackHole;
 use glam::Quat;
-use gluon::{Handler, Liveness, Node, RefExt};
+use gluon_ipc::{Handler, Liveness, Node, RefExt};
 use minimize::MinimizeButton;
 use stardust_xr_fusion::{
 	client::{Client, ClientHandler},
@@ -126,7 +126,7 @@ pub struct MinimizingTracked {
 	guard: OnceLock<TrackedGuard>,
 }
 impl TrackedStateReceiverHandler for MinimizingTracked {
-	async fn tracked(&self, _ctx: gluon::Context, tracked: bool) {
+	async fn tracked(&self, _ctx: gluon_ipc::Context, tracked: bool) {
 		_ = self
 			.spatial
 			.set_local_transform(PartialTransform::from_scale([tracked as u8 as f32; 3]));

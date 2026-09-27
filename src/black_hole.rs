@@ -1,5 +1,5 @@
 use glam::Vec3;
-use gluon::Node;
+use gluon_ipc::Node;
 use stardust_xr_fusion::{
 	Result,
 	client::{Client, ClientHandler, FrameInfo},

@@ -4,21 +4,21 @@ version = "0.50.0"
 edition = "2024"
 
 [dependencies]
-glam = { version = "0.30.8", features = ["mint"] }
+glam = { version = "0.33", features = ["mint"] }
 tokio = { version = "1.38.0", default-features = false, features = ["rt"] }
 tokio-stream = { version = "0.1.17", features = ["signal"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["tracing"] }
-tween = { version = "2.0.3", features = ["glam"] }
+tween = { version = "2.2", features = ["glam"] }
 
-[dependencies.gluon]
-git = "https://github.com/technobaboo/gluon"
-branch = "refactor/strongipc"
+[dependencies.gluon-ipc]
+version="0.1.0"
+# git = "https://github.com/technobaboo/gluon"
 
 [dependencies.stardust-xr-fusion]
-git = "https://github.com/StardustXR/core"
-branch = "refactor/strongipc"
+version="0.52.0"
+# git = "https://github.com/StardustXR/core"
 
 [dependencies.stardust-xr-molecules]
-git = "https://github.com/StardustXR/molecules"
-branch = "refactor/strongipc"
+version="0.52.0"
+# git = "https://github.com/StardustXR/molecules"
