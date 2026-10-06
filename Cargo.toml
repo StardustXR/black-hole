@@ -22,3 +22,11 @@ version="0.52.0"
 [dependencies.stardust-xr-molecules]
 version="0.52.0"
 # git = "https://github.com/StardustXR/molecules"
+
+[patch.crates-io.stardust-xr-protocol]
+path = "../../core/protocol"
+[patch.crates-io.stardust-xr-fusion]
+path = "../../core/fusion"
+
+[patch.crates-io.stardust-xr-molecules]
+path = "../../molecules"

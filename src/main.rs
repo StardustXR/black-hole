@@ -8,16 +8,14 @@ use std::{
 
 use black_hole::BlackHole;
 use glam::Quat;
-use gluon_ipc::{Handler, Liveness, Node, RefExt};
+use gluon_ipc::{Handler, Liveness, Node};
 use minimize::MinimizeButton;
 use stardust_xr_fusion::{
 	client::{Client, ClientHandler},
 	project_local_resources,
 	spatial::{PartialTransform, Spatial, SpatialExt, SpatialRef, Transform},
 	suis::Chirality,
-	tracked::{
-		Tracked, TrackedExt, TrackedGuard, TrackedStateReceiver, TrackedStateReceiverHandler,
-	},
+	tracked::{Tracked, TrackedExt, TrackedGuard, TrackedStateReceiverHandler},
 };
 use tokio::sync::broadcast::error::RecvError;
 
@@ -33,14 +31,18 @@ async fn main() {
 		.await
 		.expect("Unable to create black hole");
 
-	// TODO: anchor the minimize button to the hand/controller via
-	// controller_transform/hand_transform below once the server exposes tracked
-	// objects for them through stardust_xr_fusion::tracked (currently only
-	// "stardust-hmd" and "stardust-stage" are implemented server-side).
-	// Until then it's always anchored to root.
 	let mut buttons = vec![];
 	let xr_found = false;
-	if let Some((anchor, transform, handle)) = controller_transform(&client, Chirality::Left).await
+	if let Some((anchor, transform, handle)) =
+		controller_transform_ideal(&client, Chirality::Left).await
+	{
+		let button = MinimizeButton::new(&client, &anchor, transform)
+			.await
+			.expect("Unable to create minimize button");
+		buttons.push((button, Some(handle)));
+		// xr_found = true;
+	} else if let Some((anchor, transform, handle)) =
+		controller_transform_unideal(&client, Chirality::Left).await
 	{
 		let button = MinimizeButton::new(&client, &anchor, transform)
 			.await
@@ -87,10 +89,7 @@ async fn main() {
 	}
 }
 
-// TODO: port these to the new stardust_xr_fusion::tracked API once the server
-// implements tracked objects for controllers/hands (see the TODO in main above).
-// Kept around as reference for the dbus-based lookup this used to do.
-pub async fn controller_transform(
+pub async fn controller_transform_unideal(
 	client: &Client<impl ClientHandler>,
 	chirality: Chirality,
 ) -> Option<(SpatialRef, Transform, Node<MinimizingTracked>)> {
@@ -104,6 +103,31 @@ pub async fn controller_transform(
 			Quat::from_rotation_x(PI + FRAC_PI_2),
 		),
 		tracked,
+	))
+}
+pub async fn controller_transform_ideal(
+	client: &Client<impl ClientHandler>,
+	chirality: Chirality,
+) -> Option<(SpatialRef, Transform, Node<MinimizingTracked>)> {
+	let tracked_palm = Tracked::controller_palm(chirality).await.ok()?;
+	let tracked_grip = Tracked::controller_grip(chirality).await.ok()?;
+	let (grip_tracked, grip_anchor) = MinimizingTracked::new(client, tracked_grip).await?;
+	let (_, palm_anchor) = MinimizingTracked::new(client, tracked_palm).await?;
+
+	let offset = client
+		.spatial_interface()
+		.get_relative_transform(grip_anchor.clone(), palm_anchor)
+		.await
+		.ok()?
+		.ok()?;
+
+	Some((
+		grip_anchor,
+		Transform::from_translation_rotation(
+			[-offset.translation.x + 0.04, 0.0, 0.0],
+			Quat::from_rotation_x(PI + FRAC_PI_2),
+		),
+		grip_tracked,
 	))
 }
 pub async fn hand_transform(
@@ -140,10 +164,11 @@ impl MinimizingTracked {
 		let (spatial, spatial_ref) = Spatial::new(client, client.root(), Transform::IDENTITY)
 			.await
 			.ok()?;
-		let (node, tracked_state_receiver) = TrackedStateReceiver::new_node(Self {
+		let (node, tracked_state_receiver) = MinimizingTracked {
 			spatial,
 			guard: OnceLock::new(),
-		})
+		}
+		.to_node()
 		.ok()?;
 		let (tracked_spatial_ref, guard, tracked) =
 			tracked.get(tracked_state_receiver).await.ok()?;

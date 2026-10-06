@@ -57,7 +57,7 @@ impl MinimizeButton {
 				character_height: 0.02,
 				color: rgba_linear!(1.0, 1.0, 1.0, 1.0),
 				text_align_x: XAlign::Center,
-				text_align_y: YAlign::Top,
+				text_align_y: YAlign::Center,
 				font: None,
 				bounds: None,
 			},

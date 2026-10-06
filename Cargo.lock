@@ -1017,9 +1017,7 @@ dependencies = [
 
 [[package]]
 name = "stardust-xr-fusion"
-version = "0.52.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1897d300c9c5f213f61ea03b3d06fc3b06048cf8116b4a858f0dea19d2eb76b9"
+version = "0.52.1"
 dependencies = [
  "glam 0.33.11",
  "gluon-ipc",
@@ -1035,8 +1033,6 @@ dependencies = [
 [[package]]
 name = "stardust-xr-molecules"
 version = "0.52.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4bea71366497ecc641035d37058c59db133225c9a11936424ef4cac9e50b4a4a"
 dependencies = [
  "futures",
  "glam 0.33.11",
@@ -1057,8 +1053,6 @@ dependencies = [
 [[package]]
 name = "stardust-xr-molecules-protocols"
 version = "0.52.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "56ff868f2e22706c25d80b87e3219b088462128f3332fad117fcb09f7399d906"
 dependencies = [
  "gluon-ipc",
  "gluon-ipc-codegen",
@@ -1069,8 +1063,6 @@ dependencies = [
 [[package]]
 name = "stardust-xr-protocol"
 version = "0.52.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "097926accefdaa7ab195978044b38b463758e948dabe4b394705aa7df102f61c"
 dependencies = [
  "fnv",
  "glam 0.33.11",
