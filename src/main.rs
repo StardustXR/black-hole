@@ -93,8 +93,8 @@ pub async fn controller_transform_unideal(
 	client: &Client<impl ClientHandler>,
 	chirality: Chirality,
 ) -> Option<(SpatialRef, Transform, Node<MinimizingTracked>)> {
-	let tracked = Tracked::controller(chirality).await.ok()?;
-	let (tracked, anchor) = MinimizingTracked::new(client, tracked).await?;
+	let aim_tracked = Tracked::controller_aim(chirality).await.ok()?;
+	let (tracked, anchor) = MinimizingTracked::new(client, aim_tracked).await?;
 
 	Some((
 		anchor,
@@ -109,10 +109,10 @@ pub async fn controller_transform_ideal(
 	client: &Client<impl ClientHandler>,
 	chirality: Chirality,
 ) -> Option<(SpatialRef, Transform, Node<MinimizingTracked>)> {
-	let tracked_palm = Tracked::controller_palm(chirality).await.ok()?;
+	let tracked_grip_surface = Tracked::controller_grip_surface(chirality).await.ok()?;
 	let tracked_grip = Tracked::controller_grip(chirality).await.ok()?;
 	let (grip_tracked, grip_anchor) = MinimizingTracked::new(client, tracked_grip).await?;
-	let (_, palm_anchor) = MinimizingTracked::new(client, tracked_palm).await?;
+	let (_, palm_anchor) = MinimizingTracked::new(client, tracked_grip_surface).await?;
 
 	let offset = client
 		.spatial_interface()
@@ -134,8 +134,8 @@ pub async fn hand_transform(
 	client: &Client<impl ClientHandler>,
 	chirality: Chirality,
 ) -> Option<(SpatialRef, Transform, Node<MinimizingTracked>)> {
-	let tracked = Tracked::hand(chirality).await.ok()?;
-	let (tracked, anchor) = MinimizingTracked::new(client, tracked).await?;
+	let palm_tracked = Tracked::hand_palm(chirality).await.ok()?;
+	let (tracked, anchor) = MinimizingTracked::new(client, palm_tracked).await?;
 
 	Some((
 		anchor,
