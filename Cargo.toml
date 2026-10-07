@@ -1,6 +1,6 @@
 [package]
 name = "black-hole"
-version = "0.50.0"
+version = "0.53.0-rc.1"
 edition = "2024"
 
 [dependencies]
@@ -12,21 +12,21 @@ tracing-subscriber = { version = "0.3.19", features = ["tracing"] }
 tween = { version = "2.2", features = ["glam"] }
 
 [dependencies.gluon-ipc]
-version="0.1.0"
+version="0.1.1"
 # git = "https://github.com/technobaboo/gluon"
 
 [dependencies.stardust-xr-fusion]
-version="0.52.0"
+version="0.53.0-rc.1"
 # git = "https://github.com/StardustXR/core"
 
 [dependencies.stardust-xr-molecules]
-version="0.52.0"
+version="0.53.0-rc.1"
 # git = "https://github.com/StardustXR/molecules"
 
-[patch.crates-io.stardust-xr-protocol]
-path = "../../core/protocol"
-[patch.crates-io.stardust-xr-fusion]
-path = "../../core/fusion"
+# [patch.crates-io.stardust-xr-protocol]
+# path = "../../core/protocol"
+# [patch.crates-io.stardust-xr-fusion]
+# path = "../../core/fusion"
 
-[patch.crates-io.stardust-xr-molecules]
-path = "../../molecules"
+# [patch.crates-io.stardust-xr-molecules]
+# path = "../../molecules"
