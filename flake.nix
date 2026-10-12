@@ -2,50 +2,57 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     crane.url = "github:ipetkov/crane";
-    rust-overlay = {
-        url = "github:oxalica/rust-overlay";
-        inputs.nixpkgs.follows = "nixpkgs";
-    };
   };
 
-
-  outputs = { self, nixpkgs, crane, rust-overlay }:
-  let supportedSystems = [ "aarch64-linux" "x86_64-linux" ];
+  outputs =
+    {
+      self,
+      nixpkgs,
+      crane,
+    }:
+    let
+      supportedSystems = [
+        "aarch64-linux"
+        "x86_64-linux"
+      ];
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
-      nixpkgsFor = forAllSystems (system: import nixpkgs {
-          inherit system;
-          overlays = [ rust-overlay.overlays.default ];
-      });
-  in {
-    packages = forAllSystems (system: let pkgs = nixpkgsFor.${system}; in {
-      default =
-      let
-      craneLib = (crane.mkLib pkgs).overrideToolchain (p: p.rust-bin.stable.latest.default.override {
-        targets = [ "x86_64-unknown-linux-musl" ];
-      });
-      in craneLib.buildPackage {
-        src = ./.;
-        cargoLock = ./Cargo.lock;
+      nixpkgsFor = forAllSystems (system: import nixpkgs { inherit system; });
+    in
+    {
+      packages = forAllSystems (
+        system:
+        let
+          pkgs = nixpkgsFor.${system};
+          craneLib = crane.mkLib pkgs;
+        in
+        {
+          default = craneLib.buildPackage {
+            src = ./.;
+            cargoLock = ./Cargo.lock;
+            doCheck = false;
 
-        CARGO_BUILD_TARGET = "x86_64-unknown-linux-musl";
-        CARGO_BUILD_RUSTFLAGS = "-C target-feature=+crt-static";
+            nativeBuildInputs = [ pkgs.just ];
+            postInstall = "just prefix=$out install-data";
+            STARDUST_RES_PREFIXES = "${builtins.placeholder "out"}/share";
+          };
+        }
+      );
+      formatter = forAllSystems (system: nixpkgsFor.${system}.nixfmt-tree);
 
-        STARDUST_RES_PREFIXES = pkgs.stdenvNoCC.mkDerivation {
-          name = "data";
-          src = ./.;
-
-          buildPhase = "cp -r $src/data $out";
-        };
-      };
-    });
-
-    devShells = forAllSystems (system: let pkgs = nixpkgsFor.${system}; in {
-      default = pkgs.mkShell {
-        nativeBuildInputs = with pkgs; [
-          cargo
-          rustc
-        ];
-      };
-    });
-  };
+      devShells = forAllSystems (
+        system:
+        let
+          pkgs = nixpkgsFor.${system};
+        in
+        {
+          default = pkgs.mkShell {
+            nativeBuildInputs = with pkgs; [
+              cargo
+              rustc
+              just
+            ];
+          };
+        }
+      );
+    };
 }
