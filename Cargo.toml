@@ -23,9 +23,12 @@ version="0.53.0-rc.1"
 # path = "../../asteroids2"
 git = "https://github.com/StardustXR/asteroids"
 
-# [patch.crates-io.stardust-xr-protocol]
+[patch.crates-io.stardust-xr-protocol]
+git = "https://github.com/StardustXR/core"
 # path = "../../core/protocol"
-# [patch.crates-io.stardust-xr-fusion]
+
+[patch.crates-io.stardust-xr-fusion]
+git = "https://github.com/StardustXR/core"
 # path = "../../core/fusion"
 
 # [patch.crates-io.stardust-xr-molecules]

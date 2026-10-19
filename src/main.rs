@@ -26,13 +26,8 @@ use std::{
 
 const ANIM_DURATION: f32 = 0.25;
 
-/// a black hole is always pulling, the reach stays wide open so anything containable
-/// keeps wanting to fall into it
-const REACH: f32 = 1000.0;
-
-/// how small the hole gets while everything is stuffed inside it, never zero or the
-/// server inverts a singular transform and everything contained lands on NaN
-const MIN_SCALE: f32 = 0.01;
+const OPEN_RADIUS: f32 = 10.0;
+const CLOSED_SCALE: f32 = 0.01;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
@@ -133,26 +128,28 @@ impl Reify for BlackHole {
 		Spatial::default()
 			.build()
 			.child(
-				Entity::new(Shape::Sphere { radius: REACH })
-					.component(Container)
-					.pos(if self.closed { self.hole } else { Vec3::ZERO })
-					.scl([if self.closed { MIN_SCALE } else { 1.0 }; 3])
-					.build()
-					// the pull-in waits for the pulse to tip over, so the suck-in runs with the
-					// visuals rather than ahead of them
-					.animation(|a| {
-						a.transform(if self.closed {
-							expo_in(ANIM_DURATION).delay(ANIM_DURATION)
-						} else {
-							expo_out(ANIM_DURATION)
-						})
+				Entity::new(Shape::Sphere {
+					radius: OPEN_RADIUS,
+				})
+				.component(Container)
+				.pos(if self.closed { self.hole } else { Vec3::ZERO })
+				.scl([if self.closed { CLOSED_SCALE } else { 1.0 }; 3])
+				.build()
+				// the pull-in waits for the pulse to tip over, so the suck-in runs with the
+				// visuals rather than ahead of them
+				.animation(|a| {
+					a.transform(if self.closed {
+						expo_in(ANIM_DURATION).delay(ANIM_DURATION)
+					} else {
+						expo_out(ANIM_DURATION)
 					})
-					.vanish(|a| a.transform(Transform::IDENTITY, expo_out(ANIM_DURATION))),
+				})
+				.vanish(|a| a.transform(Transform::IDENTITY, expo_out(ANIM_DURATION))),
 			)
 			.child(
 				Spatial::default().pos(self.hole).build().child(
 					Spatial::default()
-						.scl([if pulse { 1.0 } else { 0.0 }; 3])
+						.scl([if pulse { OPEN_RADIUS } else { CLOSED_SCALE }; 3])
 						.build()
 						.animation(|a| {
 							a._0(if pulse {
