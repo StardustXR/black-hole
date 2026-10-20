@@ -48,6 +48,9 @@ enum Mount {
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct BlackHole {
+	// make a black hole minimize button at the root, for testing
+	#[serde(skip)]
+	test: bool,
 	// nothing survives a restart, whatever was swallowed is gone by then anyway
 	#[serde(skip)]
 	closed: bool,
@@ -77,6 +80,10 @@ impl Migrate for BlackHole {
 }
 impl ClientState for BlackHole {
 	const APP_ID: &'static str = "org.stardustxr.BlackHole";
+
+	fn on_start(&mut self, _context: &Context, _tasks: impl Tasker<Self>) {
+		self.test = std::env::args().nth(1).as_deref() == Some("-t");
+	}
 }
 impl BlackHole {
 	fn busy(&self, time: f32) -> bool {
@@ -208,11 +215,13 @@ impl Reify for BlackHole {
 					)
 				})),
 			)
-			.child(self.minimize(
-				time,
-				Mount::Desk,
-				Transform::from_translation([0.0, 0.0, -0.3]),
-			))
+			.maybe_child(self.test.then(|| {
+				self.minimize(
+					time,
+					Mount::Desk,
+					Transform::from_translation([0.0, 0.0, -0.3]),
+				)
+			}))
 	}
 }
 
